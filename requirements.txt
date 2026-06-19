@@ -1,0 +1,20 @@
+# Cogni — Python runtime dependencies
+#
+# Tested with Python 3.10+. Earlier versions may work; 3.10 is the floor
+# because we use PEP-604 union types (`str | None`) throughout.
+
+# LLM vendor SDKs — all three are needed when --propose-fixes is used.
+anthropic>=0.34.0      # Claude (proposer + reviser + reflector)
+openai>=1.40.0         # GPT-5 family (verifier)
+google-genai>=0.3.0    # Gemini (verifier)
+
+# Loads ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY from .env
+python-dotenv>=1.0.0
+
+# Optional but recommended — PyYAML lets you write richer scenario configs.
+# Without it, cogni_check.py falls back to a tiny built-in parser that
+# handles the flat shape we ship.
+PyYAML>=6.0
+
+# Dev/test only — runs the 92-test suite.
+pytest>=7.4

@@ -1,0 +1,28 @@
+name: ibex_synth
+domain: vlsi
+description: |
+  Same Ibex synthesis-prediction trial as scenarios/ibex_signoff, but
+  rebound to the v1 synth rule pack (packs/synth/rules.json). The
+  agent must use the new v1 fields (kind, predicts, prevents,
+  applies_to_v1, code_origin) end-to-end while still producing the
+  same hit-rate ballpark on the cognipd Ibex measurements.
+
+  This is the synth-stage half of the v1-pack acceptance test
+  (paired with scenarios/rtl_demo for the RTL-stage half).
+
+# (stage, tool) -> picks adapters/synth/yosys/{perceiver,oracle}.py
+stage: synth
+tool:  yosys
+
+# Where the design lives (unchanged from ibex_signoff)
+rtl_root: /home/user/workspace/cognipd/design/ibex
+
+# v1 synth knowledge pack
+pack_path: /home/user/workspace/cogni/packs/synth/rules.json
+
+# Oracle reuses the same ground-truth artifacts cognipd produced.
+oracle:
+  reports_dir:   /home/user/workspace/cognipd/design/ibex/reports
+  findings_path: /home/user/workspace/cognipd/runs/synth_findings.json
+
+confidence_floor: uncertain

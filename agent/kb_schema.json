@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cogni.local/schemas/kb-rule/v1",
+  "title": "cogni KB rule pack (v1)",
+  "description": "Schema for a single rule pack JSON file. See docs/KB_RULE_FORMAT.md for the design rationale.",
+  "type": "object",
+  "required": ["pack", "version", "schema", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "pack":        { "type": "string", "minLength": 1 },
+    "version":     { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "schema":      { "type": "string", "const": "kb-rule/v1" },
+    "description": { "type": "string" },
+    "stages":      {
+      "type": "array",
+      "items": { "$ref": "#/$defs/stage" },
+      "uniqueItems": true
+    },
+    "tools":       {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "key_index":   {
+      "type": "object",
+      "description": "Forward declaration of all measurement keys used by this pack. Loader rejects rules that predict undeclared keys.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["int", "float", "str", "bool", "list", "dict"]
+            },
+            "unit":        { "type": ["string", "null"] },
+            "description": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+
+  "$defs": {
+    "stage": {
+      "type": "string",
+      "enum": ["pre_rtl", "rtl", "synth", "pnr", "cts", "sta", "sim", "power", "signoff", "weather"]
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["constraint", "tendency", "heuristic", "identity"]
+    },
+    "strength": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "shadow", "retired"]
+    },
+    "code_origin": {
+      "type": "string",
+      "enum": ["any", "human", "ai_generated", "ai_assisted", "legacy_imported"]
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["intervals", "enum", "ranking", "includes", "excludes", "legacy"]
+    },
+    "horizon": { "$ref": "#/$defs/stage" },
+
+    "applies_to": {
+      "type": "object",
+      "required": ["stage", "tools", "pdks", "design_class", "code_origin"],
+      "additionalProperties": false,
+      "properties": {
+        "stage":        { "type": "array", "items": { "$ref": "#/$defs/stage" }, "minItems": 1, "uniqueItems": true },
+        "tools":        { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "pdks":         { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "design_class": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "code_origin":  { "type": "array", "items": { "$ref": "#/$defs/code_origin" }, "minItems": 1, "uniqueItems": true }
+      }
+    },
+
+    "predicate": {
+      "oneOf": [
+        { "type": "object", "required": ["op", "name"],          "additionalProperties": false, "properties": { "op": { "const": "tag" },     "name": { "type": "string" } } },
+        { "type": "object", "required": ["op", "key", "value"],  "additionalProperties": false, "properties": { "op": { "enum": ["eq", "ne"] },          "key": { "type": "string" }, "value": {} } },
+        { "type": "object", "required": ["op", "key", "value"],  "additionalProperties": false, "properties": { "op": { "enum": ["lt", "lte", "gt", "gte"] }, "key": { "type": "string" }, "value": { "type": "number" } } },
+        { "type": "object", "required": ["op", "key", "values"], "additionalProperties": false, "properties": { "op": { "const": "in" },      "key": { "type": "string" }, "values": { "type": "array", "minItems": 1 } } },
+        { "type": "object", "required": ["op", "key", "pattern"],"additionalProperties": false, "properties": { "op": { "const": "matches" }, "key": { "type": "string" }, "pattern": { "type": "string" } } },
+        { "type": "object", "required": ["op", "key"],           "additionalProperties": false, "properties": { "op": { "const": "exists" },  "key": { "type": "string" } } },
+        { "type": "object", "required": ["op", "preds"],         "additionalProperties": false, "properties": { "op": { "enum": ["all", "any"] }, "preds": { "type": "array", "items": { "$ref": "#/$defs/predicate" }, "minItems": 1 } } },
+        { "type": "object", "required": ["op", "pred"],          "additionalProperties": false, "properties": { "op": { "const": "not" },     "pred": { "$ref": "#/$defs/predicate" } } }
+      ]
+    },
+
+    "predicts_entry": {
+      "type": "object",
+      "required": ["measurement_key", "channel", "value", "horizon"],
+      "additionalProperties": false,
+      "properties": {
+        "measurement_key": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_<>]*)+$" },
+        "channel":         { "$ref": "#/$defs/channel" },
+        "value":           {},
+        "horizon":         { "$ref": "#/$defs/horizon" }
+      }
+    },
+
+    "prevents_entry": {
+      "type": "object",
+      "required": ["downstream_stage", "downstream_key", "mechanism"],
+      "additionalProperties": false,
+      "properties": {
+        "downstream_stage":            { "$ref": "#/$defs/stage" },
+        "downstream_key":              { "type": "string" },
+        "mechanism":                   { "type": "string" },
+        "estimated_cost_saved_hours":  { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "citation": {
+      "type": "object",
+      "required": ["title", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "url":   { "type": "string", "format": "uri" }
+      }
+    },
+
+    "history_entry": {
+      "type": "object",
+      "required": ["at", "event"],
+      "additionalProperties": true,
+      "properties": {
+        "at":             { "type": "string" },
+        "event":          { "type": "string", "enum": ["cited", "edit", "retire"] },
+        "session_dir":    { "type": "string" },
+        "qid":            { "type": "string" },
+        "verdict":        { "type": "string" },
+        "evidence_key":   { "type": "string" },
+        "evidence_value": {},
+        "from_strength":  { "$ref": "#/$defs/strength" },
+        "to_strength":    { "$ref": "#/$defs/strength" },
+        "kind":           { "type": "string", "enum": ["strengthen", "weaken", "add_unless", "narrow_when", "broaden_when", "rewrite"] },
+        "reason":         { "type": "string" }
+      }
+    },
+
+    "rule": {
+      "type": "object",
+      "required": [
+        "id", "version", "statement", "kind", "strength", "status",
+        "applies_to", "when", "unless", "predicts",
+        "rationale", "citations", "authored_by", "authored_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id":          { "type": "string", "pattern": "^r_[a-z0-9_]+$" },
+        "version":     { "type": "integer", "minimum": 1 },
+        "statement":   { "type": "string", "minLength": 1 },
+        "kind":        { "$ref": "#/$defs/kind" },
+        "strength":    { "$ref": "#/$defs/strength" },
+        "status":      { "$ref": "#/$defs/status" },
+        "applies_to":  { "$ref": "#/$defs/applies_to" },
+        "when":        { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "unless":      { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "predicts":    { "type": "array", "items": { "$ref": "#/$defs/predicts_entry" } },
+        "prevents":    { "type": "array", "items": { "$ref": "#/$defs/prevents_entry" } },
+        "rationale":   { "type": "string" },
+        "citations":   { "type": "array", "items": { "$ref": "#/$defs/citation" } },
+        "authored_by": { "type": "string" },
+        "authored_at": { "type": "string" },
+        "examples": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "violating": { "type": "array", "items": { "type": "string" } },
+            "compliant": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/history_entry" }
+        }
+      }
+    }
+  }
+}

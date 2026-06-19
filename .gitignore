@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Run artifacts
+runs/
+scenarios/*/report-*/
+scenarios/*/llm_calls/
+
+# Editor cruft
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~

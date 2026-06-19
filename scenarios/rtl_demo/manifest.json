@@ -1,0 +1,43 @@
+{
+  "source": "scenarios/rtl_demo/rtl/cmd_alu.sv",
+  "primary_key": "rtl.module.top",
+  "facts": {
+    "rtl.module.top": "cmd_alu",
+    "rtl.module.parameters": ["WIDTH=32"],
+    "rtl.always_blocks": 5,
+    "rtl.always_comb_blocks": 3,
+    "rtl.always_ff_blocks": 2,
+    "rtl.case_blocks": 2,
+    "rtl.fsms": 1,
+    "rtl.fsm.encoding_declared": true,
+    "rtl.fsm.two_process_style": true,
+    "rtl.fsm.style": "two_process_typedef_enum",
+    "rtl.fsm.state_count": 4,
+    "rtl.reset_domains": 1,
+    "rtl.reset_strategy": "async_low",
+    "rtl.clock_domains": 1,
+    "rtl.async_controls": 1,
+    "rtl.cdc_paths": 0,
+    "rtl.memory_arrays": 0,
+    "rtl.memory_template_match": "none",
+    "rtl.register_bits": 71,
+    "rtl.module.max_comb_depth": 4,
+    "rtl.module.max_fanout": 6,
+    "rtl.operator_max_bitwidth": 32,
+    "rtl.onehot_fsms": 0,
+    "rtl.clock_gating_candidate_groups": 0,
+    "core.code_origin": "human",
+    "core.lines_of_code": 150,
+    "core.author_intent": "FSM+ALU demo with deliberate lint hazards for testing",
+    "target.stage": "rtl",
+    "target.tool": "verilator"
+  },
+  "tags": [
+    "rtl_stage",
+    "fsm_present",
+    "human_authored",
+    "small_module",
+    "single_clock",
+    "single_reset_domain"
+  ]
+}

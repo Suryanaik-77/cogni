@@ -1,0 +1,2468 @@
+{
+  "pack": "synth",
+  "version": "1.0.0",
+  "schema": "kb-rule/v1",
+  "description": "Causal + structural rules for digital synthesis stage (Yosys+ABC, ORFS, DC, Genus) \u2014 area/cell-distribution anchors, WNS predictors, warning gates, and PPA tradeoffs.",
+  "stages": [
+    "synth"
+  ],
+  "tools": [
+    "yosys",
+    "abc",
+    "openroad",
+    "dc",
+    "genus"
+  ],
+  "key_index": {
+    "synth.total_cell_area_um2": {
+      "type": "float",
+      "unit": "um^2",
+      "description": "Sum of stdcell areas after synth (computed by oracle from gate_counts \u00d7 liberty)."
+    },
+    "synth.total_cells": {
+      "type": "int",
+      "unit": "count",
+      "description": "Total mapped cell count from yosys stat.rpt."
+    },
+    "synth.total_ff": {
+      "type": "int",
+      "unit": "count",
+      "description": "Total FF cells (DFF/DFFE/SDFF/LATCH gate prefixes)."
+    },
+    "synth.total_comb": {
+      "type": "int",
+      "unit": "count",
+      "description": "Combinational cell count = total_cells - total_ff."
+    },
+    "synth.top_module_by_cells": {
+      "type": "str",
+      "unit": null,
+      "description": "Name of the leaf module with the largest mapped cell count."
+    },
+    "synth.module_ranking": {
+      "type": "list",
+      "unit": null,
+      "description": "Top-N modules by cell count, each with module/total_cells/comb_cells/ff_cells."
+    },
+    "synth.ff_share_pct": {
+      "type": "float",
+      "unit": "percent",
+      "description": "FF cells as a percentage of total mapped cells."
+    },
+    "synth.invbuf_share_pct": {
+      "type": "float",
+      "unit": "percent",
+      "description": "INV+BUF cell types as a percentage of total mapped cells after ABC mapping."
+    },
+    "synth.icg_per_1kff": {
+      "type": "float",
+      "unit": "count_per_kff",
+      "description": "Integrated clock-gating cells inserted per 1000 FFs."
+    },
+    "synth.warnings.latch": {
+      "type": "int",
+      "unit": "count",
+      "description": "Yosys/Verilator latch-inference warning count after elaboration."
+    },
+    "synth.warnings.width": {
+      "type": "int",
+      "unit": "count",
+      "description": "Width / truncation warning count from Verilator/Yosys."
+    },
+    "synth.warnings.multidriven": {
+      "type": "int",
+      "unit": "count",
+      "description": "Multidriven-net warning count from Yosys check / Verilator."
+    },
+    "synth.wns_ns": {
+      "type": "float",
+      "unit": "ns",
+      "description": "Worst Negative Slack reported at synth-stage STA (ABC -D / opensta on synth netlist)."
+    },
+    "synth.runtime_s": {
+      "type": "float",
+      "unit": "s",
+      "description": "Wall-clock runtime of the synth flow (yosys+abc) in seconds."
+    },
+    "synth.mul_latency_cycles": {
+      "type": "int",
+      "unit": "cycles",
+      "description": "Architectural latency in cycles for the multiplier instruction."
+    },
+    "synth.mapping_engine": {
+      "type": "str",
+      "unit": null,
+      "description": "Which ABC variant was used for tech mapping (abc | abc9 | abc_new)."
+    },
+    "synth.critical_path_block": {
+      "type": "str",
+      "unit": null,
+      "description": "Module/cone label that owns the synth-stage critical path."
+    },
+    "synth.regfile_storage_floor_um2": {
+      "type": "float",
+      "unit": "um^2",
+      "description": "Lower-bound area of the architectural register-file storage bits alone (FF count \u00d7 DFF cell area)."
+    },
+    "synth.area_delta_pct_vs_fast_mult": {
+      "type": "float",
+      "unit": "percent",
+      "description": "Percent delta in total stdcell area versus an Ibex-RV32MFast configuration baseline."
+    },
+    "synth.area_delta_pct_vs_single_cycle": {
+      "type": "float",
+      "unit": "percent",
+      "description": "Percent delta in total stdcell area versus an Ibex single-cycle multiplier configuration baseline."
+    },
+    "pnr.utilization_pct": {
+      "type": "float",
+      "unit": "percent",
+      "description": "Core utilization after floorplan / global placement."
+    },
+    "pnr.congestion_h_pct": {
+      "type": "float",
+      "unit": "percent",
+      "description": "Horizontal congestion overflow percentage from global route."
+    },
+    "sta.wns_ps": {
+      "type": "float",
+      "unit": "ps",
+      "description": "Worst Negative Slack at signoff STA."
+    },
+    "sta.failing_endpoints": {
+      "type": "int",
+      "unit": "count",
+      "description": "Count of failing endpoints at signoff STA."
+    },
+    "sta.hold_violations": {
+      "type": "int",
+      "unit": "count",
+      "description": "Count of hold-time violations at signoff STA."
+    },
+    "power.dynamic_mw": {
+      "type": "float",
+      "unit": "mW",
+      "description": "Dynamic power estimate after synth/PnR."
+    }
+  },
+  "rules": [
+    {
+      "id": "r_synth_ibex_ff_regfile_area_band_sky130hd",
+      "version": 1,
+      "statement": "For an Ibex-class small RV32 core with M-extension, FF register file, and open-library sky130hd mapping, post-synth stdcell area lands in a tight band (~148k um^2) that is a useful pre-floorplan sanity anchor.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [
+          "sky130hd"
+        ],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "has_register_file"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        },
+        {
+          "op": "eq",
+          "key": "pdk.name",
+          "value": "sky130hd"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "rv32e"
+        },
+        {
+          "op": "tag",
+          "name": "latch_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "sram_regfile"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 140000.0,
+            "max": 180000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.utilization_pct",
+          "mechanism": "A calibrated synth-area expectation lets PnR pick die size correctly the first time, avoiding a re-floorplan loop.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "ORFS publishes maintained per-PDK Ibex rule files with these area numbers, and the sky130hd ORFS Ibex tutorial reports ~191k um^2 post-flow on a 796x798 core, directionally consistent once buffering and placement overhead are added.",
+      "citations": [
+        {
+          "title": "ORFS sky130hd Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/sky130hd/ibex/rules-base.json"
+        },
+        {
+          "title": "ORFS Ibex tutorial",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/tutorials/FlowTutorial.html"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_ibex_ff_regfile_area_band_nangate45",
+      "version": 1,
+      "statement": "For an Ibex-class small RV32 core with M-extension, FF register file, and open-library nangate45 mapping, post-synth stdcell area lands in a tight band (~32.5k um^2) that is a useful pre-floorplan sanity anchor.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [
+          "nangate45"
+        ],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "has_register_file"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        },
+        {
+          "op": "eq",
+          "key": "pdk.name",
+          "value": "nangate45"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "rv32e"
+        },
+        {
+          "op": "tag",
+          "name": "latch_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "sram_regfile"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 30000.0,
+            "max": 35000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.utilization_pct",
+          "mechanism": "A calibrated synth-area expectation lets PnR pick die size correctly the first time, avoiding a re-floorplan loop.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "ORFS publishes maintained per-PDK Ibex rule files with these area numbers, and the sky130hd ORFS Ibex tutorial reports ~191k um^2 post-flow on a 796x798 core, directionally consistent once buffering and placement overhead are added.",
+      "citations": [
+        {
+          "title": "ORFS nangate45 Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/nangate45/ibex/rules-base.json"
+        },
+        {
+          "title": "ORFS Ibex tutorial",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/tutorials/FlowTutorial.html"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_ibex_ff_regfile_area_band_asap7",
+      "version": 1,
+      "statement": "For an Ibex-class small RV32 core with M-extension, FF register file, and open-library asap7 mapping, post-synth stdcell area lands in a tight band (~2.43k um^2) that is a useful pre-floorplan sanity anchor.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [
+          "asap7"
+        ],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "has_register_file"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        },
+        {
+          "op": "eq",
+          "key": "pdk.name",
+          "value": "asap7"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "rv32e"
+        },
+        {
+          "op": "tag",
+          "name": "latch_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "sram_regfile"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 2300.0,
+            "max": 2800.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.utilization_pct",
+          "mechanism": "A calibrated synth-area expectation lets PnR pick die size correctly the first time, avoiding a re-floorplan loop.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "ORFS publishes maintained per-PDK Ibex rule files with these area numbers, and the sky130hd ORFS Ibex tutorial reports ~191k um^2 post-flow on a 796x798 core, directionally consistent once buffering and placement overhead are added.",
+      "citations": [
+        {
+          "title": "ORFS ASAP7 Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/asap7/ibex/rules-base.json"
+        },
+        {
+          "title": "ORFS Ibex tutorial",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/tutorials/FlowTutorial.html"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_single_cycle_multiplier_largest_area_step",
+      "version": 1,
+      "statement": "In Ibex-class cores, switching to a single-cycle multiplier is usually the largest single architectural area step at synth: about +15% area at 100 MHz and +33% at max frequency, because three 17x17 multipliers are instantiated in parallel.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "small_rv32_core",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "single_cycle_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "dsp_macro_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "time_multiplexed_multiplier"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.area_delta_pct_vs_fast_mult",
+          "channel": "intervals",
+          "value": {
+            "min": 15.0,
+            "max": 33.0,
+            "unit": "percent"
+          },
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.top_module_by_cells",
+          "channel": "enum",
+          "value": [
+            "multdiv",
+            "mult",
+            "multiplier",
+            "multdiv_fast",
+            "multdiv_slow"
+          ],
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.congestion_h_pct",
+          "mechanism": "Knowing the multiplier is the dominant contributor lets the floorplanner reserve area and avoid a congestion-driven RTL rework.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "CARRV measured +15-33% area for SC-Mult while max frequency was barely affected; the Ibex docs explicitly say SC-Mult costs ~3-4x the fast multiplier's area because three parallel 17x17 multipliers are instantiated.",
+      "citations": [
+        {
+          "title": "CARRV Ibex paper",
+          "url": "https://carrv.github.io/2021/papers/CARRV2021_paper_8_Gallmann.pdf"
+        },
+        {
+          "title": "Ibex multiplier docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/instruction_decode_execute.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_multicycle_multiplier_area_for_latency",
+      "version": 1,
+      "statement": "Fast/slow multicycle multipliers are the area-efficient default for ASIC-like open flows: RV32MFast lands at 3-4 cycles, RV32MSlow stretches MUL to clog2(op_b)+1 cycles and MULH to 33 cycles, trading latency for a clearly smaller block than the single-cycle option.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "small_rv32_core",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "multicycle_multiplier"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "single_cycle_multiplier_required"
+        },
+        {
+          "op": "tag",
+          "name": "dsp_macro_multiplier"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.area_delta_pct_vs_single_cycle",
+          "channel": "intervals",
+          "value": {
+            "min": -33.0,
+            "max": -13.0,
+            "unit": "percent"
+          },
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.mul_latency_cycles",
+          "channel": "intervals",
+          "value": {
+            "min": 2,
+            "max": 33,
+            "unit": "cycles"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.congestion_h_pct",
+          "mechanism": "Picking the multicycle variant up front avoids chasing single-cycle RV32M for free performance and paying for it in area + congestion later.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "Public Ibex docs and CARRV measurements agree: the architectural knob changes area far more reliably than it improves the achievable clock in small in-order cores.",
+      "citations": [
+        {
+          "title": "Ibex multiplier docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/instruction_decode_execute.html"
+        },
+        {
+          "title": "CARRV Ibex paper",
+          "url": "https://carrv.github.io/2021/papers/CARRV2021_paper_8_Gallmann.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_ff_regfile_storage_floor",
+      "version": 1,
+      "statement": "A 31x32 FF register file carries a large storage floor before read-mux logic is counted: ~24.8k um^2 in sky130hd, ~4.5k um^2 in Nangate45, ~0.29k um^2 in ASAP7 from public DFF cell areas alone.",
+      "kind": "identity",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "small_rv32_core",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "ff_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "has_register_file"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "latch_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "sram_regfile"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.regfile_storage_floor_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 280.0,
+            "max": 25000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.utilization_pct",
+          "mechanism": "Recognizing the regfile floor stops engineers from misattributing core area to control logic and chasing the wrong target during floorplan optimization.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "The Ibex docs steer ASIC users to latch-based storage and FPGA users to RAM-backed storage precisely because the FF storage decision dominates area early; the floor is computed from actual published DFF cell areas across three PDKs.",
+      "citations": [
+        {
+          "title": "Sky130 DFF liberty JSON",
+          "url": "https://foss-eda-tools.googlesource.com/skywater-pdk/libs/sky130_fd_sc_hd/+/refs/heads/main/cells/dfrtp/sky130_fd_sc_hd__dfrtp_1__tt_025C_1v80.lib.json"
+        },
+        {
+          "title": "Nangate45 typical liberty",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/platforms/nangate45/lib/NangateOpenCellLibrary_typical.lib"
+        },
+        {
+          "title": "ASAP7 sequential liberty",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/platforms/asap7/lib/NLDM/asap7sc7p5t_SEQ_RVT_TT_nldm_220123.lib"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_bus_fabric_width_scaling",
+      "version": 1,
+      "statement": "For mux/steer-dominated bus fabrics at fixed topology, doubling data width pushes synth cell count by roughly 1.7-2.3x, because steering logic remains largely bit-sliced even after Yosys mux reduction.",
+      "kind": "heuristic",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "bus_fabric",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "bus_fabric"
+        },
+        {
+          "op": "tag",
+          "name": "mux_dominated"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "topology_change"
+        },
+        {
+          "op": "tag",
+          "name": "pipeline_change"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cells",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 10000000,
+            "unit": "count"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.congestion_h_pct",
+          "mechanism": "Treating a 32->64 bit fabric bump as 'just wires' creates surprise congestion at PnR; this rule flags the synth-area expectation early.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "Yosys' mux-reduction passes and Basilisk's part-select postmortem agree that mux structure and width-dependent selection lowering are first-order QoR determinants in bit-sliced fabrics.",
+      "citations": [
+        {
+          "title": "Yosys opt_reduce docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/docs-preview-ci/cmd/index_passes_opt.html"
+        },
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_dsp_multiplier_dominates_width_growth",
+      "version": 1,
+      "statement": "In DSP-style integer datapaths, adders scale near-linearly with width while multiplier cost and delay grow superlinearly; pipelining or decomposition mostly shifts the area-delay Pareto rather than removing the multiplier as the dominant block.",
+      "kind": "tendency",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "asap7"
+        ],
+        "design_class": [
+          "dsp",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "dsp_block"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "dsp_macro_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "memory_dominated"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.critical_path_block",
+          "channel": "includes",
+          "value": [
+            "mul"
+          ],
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.top_module_by_cells",
+          "channel": "enum",
+          "value": [
+            "mul",
+            "multiplier",
+            "mac",
+            "mult",
+            "reduction_tree"
+          ],
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.wns_ps",
+          "mechanism": "Targeting multiplier optimization (rather than adders) before STA avoids burning effort on a path that is not the limiter.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "The 2024 multiplier study reports new Pareto points from decomposition/pipelining but no elimination of the fundamental tradeoff; OpenROAD ALU experiments show similar relative behavior across sky130hd and ASAP7.",
+      "citations": [
+        {
+          "title": "OpenROAD ALU discussion",
+          "url": "https://github.com/The-OpenROAD-Project/OpenROAD/discussions/3881"
+        },
+        {
+          "title": "2024 multiplier tradeoff paper",
+          "url": "https://arxiv.org/html/2407.03962v1"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_ff_share_low_teens_band",
+      "version": 1,
+      "statement": "In a small Ibex-class core with FF regfile, the FF share of total mapped cells lands in the low teens to ~20%; the regfile alone accounts for ~12-17% of synth area on the public ORFS Ibex datasets before pipeline+CSR flops are added.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "ff_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "sram_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "memory_dominated"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.ff_share_pct",
+          "channel": "intervals",
+          "value": {
+            "min": 10.0,
+            "max": 22.0,
+            "unit": "percent"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cells",
+          "mechanism": "Anchoring expected sequential footprint avoids hours wasted hunting 'mystery combinational bloat' when the sequential footprint is structurally normal.",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "This rule is anchored to actual public DFF cell areas and ORFS Ibex area budgets, not architectural intuition: 992 architectural bits map to 11.9-16.8% of synth area across the three open PDKs.",
+      "citations": [
+        {
+          "title": "Sky130 DFF liberty JSON",
+          "url": "https://foss-eda-tools.googlesource.com/skywater-pdk/libs/sky130_fd_sc_hd/+/refs/heads/main/cells/dfrtp/sky130_fd_sc_hd__dfrtp_1__tt_025C_1v80.lib.json"
+        },
+        {
+          "title": "ORFS sky130hd Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/sky130hd/ibex/rules-base.json"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_multdiv_usually_top_module",
+      "version": 1,
+      "statement": "In an Ibex-like RV32IM core, the mult/div block is typically the top module by cells once M is enabled, because multiplier choice is the single biggest area knob and Ibex's multiplier variants instantiate large internal arithmetic structures.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "no_rv32m"
+        },
+        {
+          "op": "tag",
+          "name": "external_accelerator_dominates"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.top_module_by_cells",
+          "channel": "enum",
+          "value": [
+            "multdiv",
+            "multdiv_fast",
+            "multdiv_slow",
+            "mult",
+            "multiplier"
+          ],
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cells",
+          "mechanism": "Knowing multdiv is the top leaf focuses module-level optimization on the real cell hotspot rather than decode/CSR fluff.",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "The published area deltas for SC-Mult vs Fast vs Slow are large enough that leaf dominance by multdiv is the practical default unless a custom block obviously overrides it.",
+      "citations": [
+        {
+          "title": "CARRV Ibex paper",
+          "url": "https://carrv.github.io/2021/papers/CARRV2021_paper_8_Gallmann.pdf"
+        },
+        {
+          "title": "Ibex multiplier docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/instruction_decode_execute.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_invbuf_tail_pressure_signal",
+      "version": 1,
+      "statement": "A noticeable INV/BUF tail after technology mapping is normal in open Yosys+ABC flows; once INV/BUF share is clearly into double digits pre-PnR, treat it as a fanout/timing pressure signal worth inspection rather than harmless noise.",
+      "kind": "heuristic",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "stdcell_mapped"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "remove_abc_buffers"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.invbuf_share_pct",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 10.0,
+            "unit": "percent"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.congestion_h_pct",
+          "mechanism": "Catching an INV/BUF spike at synth flags fanout/timing pressure before it pushes congestion into PnR.",
+          "estimated_cost_saved_hours": 5
+        }
+      ],
+      "rationale": "Yosys' ABC and dfflibmap flows can insert buffers and inverters under constrained mapping; ORFS exposes REMOVE_ABC_BUFFERS as a dedicated knob; Basilisk shows Yosys netlist reduction creates very high-fanout nets where buffer tails stop being benign.",
+      "citations": [
+        {
+          "title": "Yosys ABC command docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_techmap.html"
+        },
+        {
+          "title": "Yosys dfflibmap docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.47/cmd/dfflibmap.html"
+        },
+        {
+          "title": "OpenROAD Flow Variables",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+        },
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_icg_near_zero_without_explicit_insertion",
+      "version": 1,
+      "statement": "In open Yosys+ABC ASIC flows, integrated clock-gating insertion is essentially zero unless RTL or a wrapper library already instantiates ICGs \u2014 ORFS exposes them as black boxes rather than via aggressive automatic insertion.",
+      "kind": "identity",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "yosys_flow"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "icg_instantiated_in_rtl"
+        },
+        {
+          "op": "tag",
+          "name": "commercial_synth"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.icg_per_1kff",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1.0,
+            "unit": "count_per_kff"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "power",
+          "downstream_key": "power.dynamic_mw",
+          "mechanism": "Recognizing that automatic ICG insertion will not save dynamic power forces explicit power-strategy work earlier, before the power surprise at signoff.",
+          "estimated_cost_saved_hours": 3
+        }
+      ],
+      "rationale": "This is one of the clearest practical differences from commercial synthesis: Ibex's latch regfile even requires an explicit prim_clock_gating wrapper, and ORFS does not auto-insert ICGs.",
+      "citations": [
+        {
+          "title": "OpenROAD Flow Variables",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+        },
+        {
+          "title": "Ibex register-file docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/register_file.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_ibex_wns_not_set_by_multiplier",
+      "version": 1,
+      "statement": "In Ibex-class cores with a multicycle multiplier, the worst path is more likely in control / instruction-request logic than in the multiplier itself; SBP and BT-ALU cut max frequency by 22% and 16% in CARRV while SC-Mult barely changed Fmax.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "small_rv32_core"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "small_core"
+        },
+        {
+          "op": "tag",
+          "name": "multicycle_multiplier"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "single_cycle_multiplier"
+        },
+        {
+          "op": "tag",
+          "name": "custom_arith_block"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.critical_path_block",
+          "channel": "excludes",
+          "value": [
+            "multdiv",
+            "multiplier",
+            "mult"
+          ],
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Pointing timing effort at the control/branch cone instead of the multiplier closes WNS faster than re-architecting the arithmetic.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "Public Ibex evidence shows area dominance and critical-path dominance can diverge: the multiplier is the area hotspot, but the instruction-request side of the machine is the frequency limiter.",
+      "citations": [
+        {
+          "title": "CARRV Ibex paper",
+          "url": "https://carrv.github.io/2021/papers/CARRV2021_paper_8_Gallmann.pdf"
+        },
+        {
+          "title": "Ibex multiplier docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/instruction_decode_execute.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_multicycle_converts_depth_to_latency",
+      "version": 1,
+      "statement": "Turning a long arithmetic function into a multicycle path predictably reduces immediate combinational depth at the cost of CPI: Ibex Fast spreads the multiplier across 3-4 cycles and Slow up to 33 cycles, shifting the cost from WNS to architectural latency.",
+      "kind": "identity",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "small_rv32_core",
+          "dsp",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "multicycle_multiplier"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "single_cycle_required"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.mul_latency_cycles",
+          "channel": "intervals",
+          "value": {
+            "min": 2,
+            "max": 33,
+            "unit": "cycles"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.wns_ps",
+          "mechanism": "Architectural staging converts a WNS problem into an extra cycle of latency, avoiding the trap of trying to rescue a too-deep arithmetic cone with sizing alone.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "This is stronger than a generic 'pipeline more' suggestion because the Ibex docs quantify the cycle shifts for each variant; multicycle is the lever that actually changes the timing object.",
+      "citations": [
+        {
+          "title": "Ibex multiplier docs",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/instruction_decode_execute.html"
+        },
+        {
+          "title": "CARRV Ibex paper",
+          "url": "https://carrv.github.io/2021/papers/CARRV2021_paper_8_Gallmann.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_adder_mux_adder_wns_hazard",
+      "version": 1,
+      "statement": "In open synthesis, operator chains such as adder->mux->adder are reliable WNS hazards because Yosys provides dedicated balance/reduction passes and Basilisk shows poor part-select/mux lowering can create much larger combinational cones than the RTL author intended.",
+      "kind": "heuristic",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "small_rv32_core",
+          "dsp",
+          "accelerator",
+          "bus_fabric"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "arith_steering_chain"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "explicitly_pipelined"
+        },
+        {
+          "op": "tag",
+          "name": "commercial_datapath_optimizer"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.wns_ns",
+          "channel": "intervals",
+          "value": {
+            "min": -10.0,
+            "max": 0.0,
+            "unit": "ns"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Inserting a register or restructuring the chain at synth review prevents a placement-only fix attempt later.",
+          "estimated_cost_saved_hours": 5
+        }
+      ],
+      "rationale": "Yosys documents extra passes (opt_balance_tree, opt_reduce) specifically for these chains, which is the strongest signal that they recur often enough to deserve a dedicated review rule.",
+      "citations": [
+        {
+          "title": "Yosys opt_reduce docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/docs-preview-ci/cmd/index_passes_opt.html"
+        },
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_high_fanout_control_predicts_wns",
+      "version": 1,
+      "statement": "High-fanout control and decode nets are stronger WNS predictors than leaf size in Yosys-based flows because Yosys reduces redundant logic without considering placement, creating very high-fanout nets that ABC only partially repairs with library timing assumptions.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "small_rv32_core",
+          "bus_fabric",
+          "accelerator"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "broad_control_distribution"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "physically_partitioned"
+        },
+        {
+          "op": "tag",
+          "name": "commercial_synth"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.wns_ns",
+          "channel": "intervals",
+          "value": {
+            "min": -10.0,
+            "max": 0.0,
+            "unit": "ns"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Catching a high-fanout control net at synth (and partitioning or pipelining it) prevents the silent post-place WNS regression that Yosys+ABC cannot fix on its own.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "Basilisk's postmortem ties Yosys netlist reduction to very high-fanout nets; ORFS exposes default driver/load assumptions precisely because these electrical surrogates matter when the netlist was not built with placement awareness.",
+      "citations": [
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        },
+        {
+          "title": "Yosys ABC command docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_techmap.html"
+        },
+        {
+          "title": "OpenROAD Flow Variables",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+        },
+        {
+          "title": "PULP UCB 2024 talk",
+          "url": "https://pulp-platform.org/docs/ucb2024/BeniniUCB10-24.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_flatten_qor_vs_runtime",
+      "version": 1,
+      "statement": "Flat synthesis is usually the best pure-QoR setting in Yosys because flattening removes module boundaries, but it carries the largest runtime and loses hierarchy useful for debug and physical planning.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "flatten_synth"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "needs_hierarchy_for_macros"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.runtime_s",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "s"
+          },
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.runtime_s",
+          "mechanism": "Choosing flat versus hierarchical deliberately stops engineers from running blind full-flat iterations and paying compile-time tax on every change.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "Yosys' keep_hierarchy and flatten controls exist precisely because this is a first-order QoR/runtime tradeoff, not a cosmetic one; ORFS maintainers describe the same tradeoff explicitly in their hierarchy discussion.",
+      "citations": [
+        {
+          "title": "OpenROAD hierarchy discussion",
+          "url": "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/discussions/1647"
+        },
+        {
+          "title": "Yosys flatten docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_hierarchy.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_two_pass_hierarchy_compromise",
+      "version": 1,
+      "statement": "The most practical open-flow compromise is a two-pass scheme: measure module sizes hierarchically, then flatten small modules while preserving larger ones \u2014 ORFS documents this as their workaround for Yosys' difficulty in choosing keep lists automatically.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "accelerator",
+          "bus_fabric",
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "large_design"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "small_design"
+        },
+        {
+          "op": "tag",
+          "name": "forced_blackbox_partitions"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.runtime_s",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "s"
+          },
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cell_area_um2",
+          "mechanism": "Two-pass keeplist tuning escapes the binary 'flat or hierarchical' trap and recovers QoR that pure-hierarchy iteration leaves on the table.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "ORFS' published hierarchy variables (HIER_RTLMP, MIN_AREA, keep-module lists) make clear this is an active design-space knob, not an edge-case hack.",
+      "citations": [
+        {
+          "title": "OpenROAD hierarchy discussion",
+          "url": "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/discussions/1647"
+        },
+        {
+          "title": "Yosys keep_hierarchy docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_hierarchy.html"
+        },
+        {
+          "title": "OpenROAD Flow Variables",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_asic_default_mapper_is_abc_not_abc9",
+      "version": 1,
+      "statement": "For standard-cell ASIC synthesis in current public Yosys flows, abc is the default and abc9 is not the baseline: upstream docs describe abc9 primarily in FPGA terms, and ORFS exposes ABC_AREA / ABC_SPEED knobs rather than an ASIC abc9 recipe.",
+      "kind": "constraint",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "abc9",
+          "openroad"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "stdcell_mapping"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "abc9_demonstrated_on_target"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.mapping_engine",
+          "channel": "enum",
+          "value": [
+            "abc"
+          ],
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cell_area_um2",
+          "mechanism": "Stopping engineers from benchmarking abc9 by default avoids misapplied FPGA-focused assumptions and the wasted hours of 'why is QoR worse on ASIC?'",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "The 2024 PULP talk frames open synthesis work around better control of abc and next-gen mappers, not abc9 as an already-settled ASIC solution.",
+      "citations": [
+        {
+          "title": "Yosys ABC command docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_techmap.html"
+        },
+        {
+          "title": "OpenROAD Flow Variables",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+        },
+        {
+          "title": "PULP UCB 2024 talk",
+          "url": "https://pulp-platform.org/docs/ucb2024/BeniniUCB10-24.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_opt_passes_are_local_helpers_only",
+      "version": 1,
+      "statement": "Yosys cleanup/sharing passes (opt_clean, opt_hier, opt_share, opt_balance_tree) are local and conditional rather than magical: they trim duplicates and rebalance trees but do not invent new architectural cuts.",
+      "kind": "constraint",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "yosys_opt_pass_run"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "needs_pipeline_restage"
+        },
+        {
+          "op": "tag",
+          "name": "needs_global_retiming"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Setting expectations that opt passes give incremental gains stops engineers from waiting for Yosys to fix a pipeline-depth problem and forces the architectural change earlier.",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "Recent open-flow gap analyses still call out missing retiming/cloning, which is the clearest sign that local pass tuning has structural limits.",
+      "citations": [
+        {
+          "title": "Yosys opt docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_opt.html"
+        },
+        {
+          "title": "Yosys detailed opt docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/docs-preview-ci/cmd/index_passes_opt.html"
+        },
+        {
+          "title": "OpenROAD MegaBoom issue",
+          "url": "https://github.com/The-OpenROAD-Project/OpenROAD/issues/4623"
+        },
+        {
+          "title": "PULP UCB 2024 talk",
+          "url": "https://pulp-platform.org/docs/ucb2024/BeniniUCB10-24.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_latch_warning_is_red_flag",
+      "version": 1,
+      "statement": "A latch warning at synth should stop normal review unless the latch is intentional, because Verilator and Yosys both treat incomplete combinational assignment as latch inference, which introduces level-sensitive timing into an otherwise edge-triggered flow.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "verilator",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "intended_flop_based"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "latch_regfile"
+        },
+        {
+          "op": "tag",
+          "name": "always_latch_intentional"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.warnings.latch",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0,
+            "unit": "count"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Catching latches at synth review prevents transparent timing paths from surfacing as confusing STA failures downstream.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "'It simulates' is not an adequate defense here: the synth product is a different timing object than the intended flop-based design once a latch is inferred.",
+      "citations": [
+        {
+          "title": "Verilator warnings guide",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "Yosys proc_dlatch docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.43/cmd/proc_dlatch.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_width_warning_is_functional_and_qor",
+      "version": 1,
+      "statement": "Width/truncation warnings are not lint cosmetics in synth review: Verilator documents them as real size mismatches, and Basilisk shows poor part-select lowering can create much larger mux structures than necessary when width-dependent semantics are mishandled.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "verilator",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "has_arith_or_indexing"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "width_truncation_intentional"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.warnings.width",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0,
+            "unit": "count"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Fixing width mismatches at synth prevents both functional escapes and unnecessary datapath bloat from accidental width growth.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "Width mismatches are one of the rare warning classes that can be both a correctness and a QoR problem at the same time, which is why they deserve a hard zero-tolerance review gate.",
+      "citations": [
+        {
+          "title": "Verilator warnings guide",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_multidriven_is_stop_review",
+      "version": 1,
+      "statement": "A multidriven warning is almost always a bug-level event at synth review: Yosys check flags conflicting drivers as core correctness, and Verilator warns that multiple driving blocks can create CDC or timing bugs even when simulation runs.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "verilator",
+          "dc",
+          "genus"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "multi_driver_present"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "reviewed_special_structure"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.warnings.multidriven",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0,
+            "unit": "count"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Halting the review on multidriven nets prevents burning cycles on QoR work before basic single-driver correctness is restored.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "This is one of the few warning classes where the correct response is 'halt the review' rather than 'note it and continue' \u2014 the bug-escape risk is too high.",
+      "citations": [
+        {
+          "title": "Yosys check docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_status.html"
+        },
+        {
+          "title": "Verilator warnings guide",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_tightening_delay_is_convex_cost",
+      "version": 1,
+      "statement": "Tightening target delay in open flows usually gives a convex area/runtime tradeoff: Yosys abc -D plus retiming/buffering accepts tighter periods at rising area and runtime cost, and OpenROAD's public Ibex DOE shows pushing the clock harder broadens the WNS spread while sky130hs area moves within a relatively tight 240k-280k um^2 window.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [
+          "sky130hd",
+          "sky130hs"
+        ],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "near_timing_wall"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "loose_initial_target"
+        },
+        {
+          "op": "tag",
+          "name": "architectural_change_in_progress"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.runtime_s",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "s"
+          },
+          "horizon": "synth"
+        },
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 0.0,
+            "max": 1000000000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.runtime_s",
+          "mechanism": "Recognizing the convex curve stops engineers from over-interpreting one aggressive run as the new baseline and chasing unstable QoR.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "Even ORFS' simple gcd example only shows a modest area shift between ABC_SPEED and ABC_AREA; once the easy wins are gone, tighter timing buys runtime/buffer churn more than clean architectural improvement.",
+      "citations": [
+        {
+          "title": "Yosys ABC command docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_techmap.html"
+        },
+        {
+          "title": "ORFS Ibex tutorial",
+          "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/tutorials/FlowTutorial.html"
+        },
+        {
+          "title": "OpenROAD TAU slides",
+          "url": "https://www.tauworkshop.com/2021/speaker_slides/tom_s.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_abc_retiming_is_local_only",
+      "version": 1,
+      "statement": "Yosys+ABC's default scripts include dretime, but public open-flow gap analyses still flag register retiming and cloning as missing or insufficient for complex SoCs \u2014 expect local depth smoothing rather than commercial-grade whole-chip retiming.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad"
+        ],
+        "pdks": [],
+        "design_class": [
+          "accelerator",
+          "bus_fabric",
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "needs_sequential_optimization"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "local_balancing_only"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.wns_ns",
+          "channel": "intervals",
+          "value": {
+            "min": -10.0,
+            "max": 10.0,
+            "unit": "ns"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Setting the right expectation for ABC retiming prevents teams from assuming the open flow has already exhausted sequential optimization options and catches escalation decisions earlier.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "OpenROAD's MegaBoom issue ties QoR limits to missing retiming and cloning; the PULP 2024 talk also calls out constraints and timing support as open challenges.",
+      "citations": [
+        {
+          "title": "Yosys ABC command docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/index_passes_techmap.html"
+        },
+        {
+          "title": "OpenROAD MegaBoom issue",
+          "url": "https://github.com/The-OpenROAD-Project/OpenROAD/issues/4623"
+        },
+        {
+          "title": "PULP UCB 2024 talk",
+          "url": "https://pulp-platform.org/docs/ucb2024/BeniniUCB10-24.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_synth_cross_node_ratios_are_anchors_not_laws",
+      "version": 1,
+      "statement": "The same Ibex RTL shrinks from ~148k um^2 on sky130hd to ~32.5k on Nangate45 to ~2.43k on ASAP7 in maintained ORFS collateral; these ratios are useful first-order anchors but a poor basis for extrapolating to other advanced nodes because library architecture, routing rules, and SRAM usage differ dramatically.",
+      "kind": "heuristic",
+      "strength": "low",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "abc",
+          "openroad",
+          "dc",
+          "genus"
+        ],
+        "pdks": [
+          "sky130hd",
+          "nangate45",
+          "asap7"
+        ],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "synth_stage"
+        },
+        {
+          "op": "tag",
+          "name": "cross_node_estimate_requested"
+        }
+      ],
+      "unless": [
+        {
+          "op": "tag",
+          "name": "real_destination_collateral_available"
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "synth.total_cell_area_um2",
+          "channel": "intervals",
+          "value": {
+            "min": 1000.0,
+            "max": 1000000.0,
+            "unit": "um^2"
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.utilization_pct",
+          "mechanism": "Refusing false precision in node-port estimates avoids misleading promises about 'automatic' area collapse at advanced nodes.",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "The point of the rule is to keep the useful anchor while refusing the false certainty: open-flow studies repeatedly emphasize that QoR depends on netlist structure and physical effects rather than node label alone.",
+      "citations": [
+        {
+          "title": "ORFS sky130hd Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/sky130hd/ibex/rules-base.json"
+        },
+        {
+          "title": "ORFS nangate45 Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/nangate45/ibex/rules-base.json"
+        },
+        {
+          "title": "ORFS ASAP7 Ibex rules",
+          "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD-flow-scripts/master/flow/designs/asap7/ibex/rules-base.json"
+        },
+        {
+          "title": "ASAP7 ICCAD tutorial slides",
+          "url": "https://asap.asu.edu/wp-content/uploads/sites/47/2021/11/iccad17_asu_asap7_171115c.pdf"
+        },
+        {
+          "title": "Basilisk 2024",
+          "url": "https://arxiv.org/html/2405.04257v2"
+        },
+        {
+          "title": "PULP UCB 2024 talk",
+          "url": "https://pulp-platform.org/docs/ucb2024/BeniniUCB10-24.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-synth",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "pack": "vlsi",
+  "version": "0.1.0",
+  "description": "Causal rules for digital physical design (synthesis through signoff). Domain: small-to-medium standard-cell ASIC flows on open-source PDKs (Sky130, ASAP7, Nangate45) and commercial nodes by extension.",
+  "rules": [
+    {
+      "id": "r_synth_area_scaling",
+      "statement": "On 130nm-class technology, a small in-order RV32 core with M-extension and FF regfile synthesizes to roughly 110k-160k um\u00b2 of standard-cell area; the dominant contributors are the multiplier and the regfile.",
+      "when": ["has_multiplier", "has_register_file", "small_core"],
+      "unless": ["pdk_7nm", "pdk_16nm", "pdk_22nm"],
+      "stage": "synthesis",
+      "strength": "strong",
+      "status": "active",
+      "citations": [
+        "https://github.com/lowRISC/ibex/blob/master/syn/README.md",
+        "https://carrv.github.io/2021/papers/CARRV2021_paper_67_Schiavone.pdf",
+        "https://theopenroadproject.org/"
+      ],
+      "rationale": "Yosys+ABC synthesis logs and ORFS reference flows for Ibex/sky130hd consistently land in this range. Multiplier and 32x32 FF regfile dominate cell count.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_synth_critical_path_mul",
+      "statement": "In small in-order RV32 cores with M-extension, the multiplier output through the writeback mux into the regfile is one of the top combinational cones; partial-product/Booth-style XOR/XNOR density is the synth-time signature.",
+      "when": ["has_multiplier", "small_core"],
+      "stage": "synthesis",
+      "strength": "tendency",
+      "status": "active",
+      "citations": [
+        "https://www.synopsys.com/glossary/what-is-physical-design.html",
+        "https://carrv.github.io/2021/papers/CARRV2021_paper_67_Schiavone.pdf"
+      ],
+      "rationale": "Multipliers carry deeper logic than ALU/branch in small cores. Confirmed on Ibex by 3916 comb cells with 788 XOR/XNORs in our run #1.",
+      "performance": {"times_cited": 1, "times_right": 1, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_synth_lsu_not_critical",
+      "statement": "In small in-order cores, the LSU response path is a thin handshake/format wrapper, not a deep combinational cone; LSU is rarely the synth-time critical path on its own.",
+      "when": ["small_core"],
+      "stage": "synthesis",
+      "strength": "tendency",
+      "status": "active",
+      "citations": [
+        "https://github.com/lowRISC/ibex/blob/master/rtl/ibex_load_store_unit.sv"
+      ],
+      "rationale": "Surprise-derived rule from cognipd run #1: predicted LSU was a top critical cone; actual gate count was 812 cells, smaller than ALU. Generic 'memory paths are slow' prior was wrong here.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_synth_rvc_decoder_dominant",
+      "statement": "In RV32-with-RVC cores, the compressed-instruction decoder is a top-3 combinational cone (often >2000 cells), driven by wide priority muxing and sign-extension nests; this creates an IF-stage timing risk often missed on first review.",
+      "when": ["has_rvc", "small_core"],
+      "stage": "synthesis",
+      "strength": "tendency",
+      "status": "active",
+      "citations": [
+        "https://github.com/lowRISC/ibex/blob/master/rtl/ibex_compressed_decoder.sv"
+      ],
+      "rationale": "Surprise-derived from cognipd run #1: ibex_compressed_decoder synthesized to 2568 comb cells, second only to multdiv_fast.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_hfn_clock_reset_first",
+      "statement": "Post-synthesis HFN ranking starts with clock and reset; everything else is design-specific. Ranking the rest by gate count of the consuming logic predicts HFN better than control-vs-datapath labels.",
+      "when": ["has_synchronous_reset"],
+      "stage": "synthesis",
+      "strength": "strong",
+      "status": "active",
+      "citations": [
+        "https://www.synopsys.com/dw/ipdir.php?ds=icc-physical-implementation",
+        "https://www.cadence.com/en_US/home/training.html"
+      ],
+      "rationale": "Confirmed in cognipd run #1: clk_i (839) > rst_ni (553) > datapath operands. Earlier 'control signals dominate HFN' rule was retired in favor of this.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_floorplan_no_macros_when_ff_regfile",
+      "statement": "A core with an FF-implemented register file and no SRAM memories has zero hard macros at floorplan; it is a pure stdcell floorplan.",
+      "when": ["ff_regfile", "no_hard_macros"],
+      "stage": "floorplan",
+      "strength": "law",
+      "status": "active",
+      "citations": [
+        "https://openroad.readthedocs.io/en/latest/main/README.html"
+      ],
+      "rationale": "Definitional: a flop array is a stdcell array.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_floorplan_low_util_routability",
+      "statement": "Core utilization at or below 50% on a small stdcell design provides ample routing margin; congestion is rarely the failure mode at this density.",
+      "when": ["util_50"],
+      "stage": "floorplan",
+      "strength": "strong",
+      "status": "active",
+      "citations": [
+        "https://www.eda.ncsu.edu/wiki/FreePDK45:Manual",
+        "https://anysilicon.com/floorplanning-asic-design/"
+      ],
+      "rationale": "65-70% is the routing-pressure threshold on most stdcell flows; 50% is well below.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_placement_cell_inflation",
+      "statement": "Post-placement standard-cell count typically expands 10-15% beyond post-synth count due to buffering, sizing, and timing fixes during place-opt.",
+      "when": [],
+      "stage": "placement",
+      "strength": "tendency",
+      "status": "active",
+      "citations": [
+        "https://vlsi.pro/place-and-route-flow/",
+        "https://www.vlsiguru.com/physical-design-flow/"
+      ],
+      "rationale": "Empirical observation across multiple PD flows; ratio varies with timing pressure.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_placement_clean_low_pressure",
+      "statement": "Small cores at 50% utilization with no hard macros and a clean RTL pass detail-place with zero violations.",
+      "when": ["small_core", "util_50", "no_hard_macros"],
+      "stage": "placement",
+      "strength": "strong",
+      "status": "active",
+      "citations": ["https://openroad.readthedocs.io/en/latest/main/src/dpl/README.html"],
+      "rationale": "Detail placement legalizes; low density and lack of macros remove the usual sources of legalization conflicts.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_cts_ff_regfile_inflates_buffers",
+      "statement": "An FF-implemented register file (~1024 sinks for 32x32) inflates CTS leaf-buffer count well above what a small core would otherwise need, often pushing total clock-tree buffer count into the 1000-2000 range.",
+      "when": ["ff_regfile"],
+      "stage": "cts",
+      "strength": "strong",
+      "status": "active",
+      "citations": [
+        "https://www.edaboard.com/threads/clock-tree-synthesis-cts.310524/",
+        "https://openroad.readthedocs.io/en/latest/main/src/cts/README.html"
+      ],
+      "rationale": "1024 flop clock pins force a deep balanced tree even on a tiny design.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_cts_skew_degrades_wns",
+      "statement": "Sky130-class clock-tree buffer trees add 0.3-0.5 ns of insertion-delay variance at the leaves; on a 10 ns budget this typically degrades post-CTS WNS by 0.3-0.7 ns versus pre-CTS.",
+      "when": ["pdk_sky130hd", "clock_target_set"],
+      "stage": "cts",
+      "strength": "tendency",
+      "status": "active",
+      "citations": [
+        "https://github.com/google/skywater-pdk",
+        "https://openroad.readthedocs.io/en/latest/main/src/cts/README.html"
+      ],
+      "rationale": "Sky130 stdcells have ~70-150 ps per buffer; a 4-5 deep tree accumulates the cited variance.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_routing_clean_drc_low_density",
+      "statement": "Small stdcell cores at 50% utilization with no macros and a non-flat clock tree route to zero detailed-route DRC errors on Sky130/Nangate.",
+      "when": ["small_core", "util_50", "no_hard_macros"],
+      "stage": "routing",
+      "strength": "strong",
+      "status": "active",
+      "citations": ["https://openroad.readthedocs.io/en/latest/main/src/drt/README.html"],
+      "rationale": "DRC failures correlate with congestion + macro-induced channel constraints; absent both, modern detailed routers close cleanly.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    },
+    {
+      "id": "r_signoff_ibex_sky130_no_close_100mhz",
+      "statement": "An Ibex-class small in-order RV32 core does not close timing at 100 MHz on Sky130HD with the default ORFS flow; expect setup WNS in [-0.7, -0.3] ns and hold WNS in [-0.6, 0.0] ns.",
+      "when": ["small_core", "pdk_sky130hd", "has_multiplier"],
+      "stage": "signoff_sta",
+      "strength": "strong",
+      "status": "active",
+      "citations": [
+        "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/tree/master/flow/designs/sky130hd/ibex"
+      ],
+      "rationale": "ORFS rules-base.json publishes finish_wns >= -0.5 as the acceptable bound. Sky130 stdcell delays plus multdiv depth exceed the 10 ns budget.",
+      "performance": {"times_cited": 0, "times_right": 0, "times_wrong": 0, "times_unfalsifiable": 0, "last_cited_at": null, "last_failed_at": null, "failures": []}
+    }
+  ]
+}

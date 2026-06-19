@@ -1,0 +1,62 @@
+{
+  "questions": [
+    {
+      "id": "q1_total_cells",
+      "stage": "synthesis",
+      "question": "After Yosys generic synthesis, roughly how many total cells will Ibex (default config) produce?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.total_cells"
+      }
+    },
+    {
+      "id": "q2_top_module",
+      "stage": "synthesis",
+      "question": "Which Ibex submodule will dominate the gate count after Yosys generic synthesis?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.top_module_by_cells",
+        "positive_substrings": ["multdiv", "mult", "compressed_decoder", "rvc", "alu"]
+      }
+    },
+    {
+      "id": "q3_ff_share",
+      "stage": "synthesis",
+      "question": "What fraction of total cells will be flip-flops vs combinational gates after generic synthesis?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.total_ff"
+      }
+    },
+    {
+      "id": "q4_lsu_dominance",
+      "stage": "synthesis",
+      "question": "Will the load-store unit (ibex_load_store_unit) be in the top 3 modules by cell count?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.module_ranking",
+        "positive_substrings": ["load_store"]
+      }
+    },
+    {
+      "id": "q5_decoder_size",
+      "stage": "synthesis",
+      "question": "Will the compressed instruction decoder (ibex_compressed_decoder) appear in the top 3 modules by cell count?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.module_ranking",
+        "positive_substrings": ["compressed_decoder"]
+      }
+    },
+    {
+      "id": "q6_andnot_top_gate",
+      "stage": "synthesis",
+      "question": "Which abstract gate type will be most numerous in the synthesised netlist?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.top_gates",
+        "positive_substrings": ["ANDNOT", "OR", "MUX"]
+      }
+    }
+  ]
+}

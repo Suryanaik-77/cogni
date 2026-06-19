@@ -1,0 +1,35 @@
+name: rtl_demo
+domain: vlsi
+description: |
+  RTL-stage prediction scenario over a hand-written 150-line FSM+ALU
+  module (cmd_alu.sv) carrying four deliberate hazards:
+    H1  always_comb missing else  -> latch on result_o
+    H2  case without default      -> latch on flag_o
+    H3  blocking '=' in always_ff -> sim/synth race risk
+    H4  implicit width extension  -> 8-bit + 32-bit add
+
+  Goal: the agent reads RTL facts (manifest.json) plus precomputed
+  lint findings (findings.json) and predicts each hazard count via
+  the v1 RTL rule pack. Verifies that v1 predicates fire on the
+  right (kind, code_origin, stage) tuples and that prediction-vs-
+  measurement matches what a real Verilator lint would report.
+
+# (stage, tool) -> picks adapters/rtl/verilator/{perceiver,oracle}.py
+stage: rtl
+tool:  verilator
+
+# Knowledge pack
+pack_path: /home/user/workspace/cogni/packs/rtl/rules.json
+
+# Perceiver: load facts from manifest (live Verilator parser is skeleton).
+perceiver:
+  top: cmd_alu
+  manifest_path: /home/user/workspace/cogni/scenarios/rtl_demo/manifest.json
+
+# Oracle: replay findings JSON (no Verilator binary in sandbox).
+oracle:
+  top: cmd_alu
+  rtl_root: /home/user/workspace/cogni/scenarios/rtl_demo/rtl
+  findings_path: /home/user/workspace/cogni/scenarios/rtl_demo/findings.json
+
+confidence_floor: uncertain

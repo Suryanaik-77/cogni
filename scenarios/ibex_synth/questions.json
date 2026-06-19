@@ -1,0 +1,84 @@
+{
+  "questions": [
+    {
+      "id": "q1_total_cells",
+      "stage": "synth",
+      "question": "After Yosys generic synthesis (no PDK mapping) of the lowRISC Ibex core with the default config (M-extension, FF register file, fast multdiv), how many total cells will the netlist contain?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.total_cells",
+        "tolerance": 0.30
+      }
+    },
+    {
+      "id": "q2_top_module",
+      "stage": "synth",
+      "question": "Which Ibex submodule will dominate the cell count after Yosys generic synthesis?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.top_module_by_cells",
+        "positive_substrings": ["multdiv", "mult", "compressed_decoder", "rvc", "alu"]
+      }
+    },
+    {
+      "id": "q3_total_ff",
+      "stage": "synth",
+      "question": "Roughly how many flip-flops will Yosys generic synthesis produce for the default Ibex core?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.total_ff",
+        "tolerance": 0.30
+      }
+    },
+    {
+      "id": "q4_ff_share_pct",
+      "stage": "synth",
+      "question": "What percent of total cells will be flip-flops in the Yosys generic netlist of the default Ibex core?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.ff_share_pct",
+        "tolerance": 5.0
+      }
+    },
+    {
+      "id": "q5_lsu_in_top3",
+      "stage": "synth",
+      "question": "Will the load-store unit (ibex_load_store_unit) appear in the top 3 modules by cell count after Yosys generic synthesis?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.module_ranking",
+        "positive_substrings": ["load_store"]
+      }
+    },
+    {
+      "id": "q6_top_gate_type",
+      "stage": "synth",
+      "question": "Which abstract gate type will dominate Yosys's generic-synthesis netlist of Ibex?",
+      "verdict": {
+        "type": "contains",
+        "measurement_key": "synth.top_gates",
+        "positive_substrings": ["ANDNOT", "OR", "MUX", "NAND", "AND"]
+      }
+    },
+    {
+      "id": "q7_invbuf_share_pct",
+      "stage": "synth",
+      "question": "After Yosys generic synthesis (which inserts NOT/BUF/ANDNOT for inverter pressure), what percent of cells will be inverter/buffer-class gates in the Ibex netlist?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.invbuf_share_pct",
+        "tolerance": 15.0
+      }
+    },
+    {
+      "id": "q8_latch_warnings",
+      "stage": "synth",
+      "question": "How many latch warnings will Yosys emit when synthesising the default Ibex core (which is a clean upstream codebase)?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.warnings.latch",
+        "tolerance": 0
+      }
+    }
+  ]
+}

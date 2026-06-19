@@ -1,0 +1,35 @@
+# Minimal Yosys recipe for scenarios/rtl_demo/cmd_alu.sv.
+# Goal: produce the synth-side symptoms of the RTL hazards in cmd_alu.sv
+# so the agent's RTL-stage rules can be graded against `horizon: synth`
+# measurements (latch warnings, total_cells, top_module_by_cells).
+
+read_verilog -sv scenarios/rtl_demo/rtl/cmd_alu.sv
+
+# Generic, technology-independent synthesis.
+# `synth -top cmd_alu` would error on latches by default; use the
+# fine-grained pipeline so we can `proc -ifx` (treat undefined branches
+# as X) which lets the inferred latches surface as Yosys WARNINGs
+# instead of hard errors. The agent's grader scrapes the log for
+# warning kinds.
+hierarchy -top cmd_alu
+# proc_dlatch -ignore lets us turn the LATCH inference error into a
+# warning so the rest of the flow runs and the oracle can count it.
+proc_init
+proc_arst
+proc_mux
+proc_dlatch -ignore '$lookahead'
+proc_dff
+proc_memwr
+proc_clean
+opt
+fsm
+opt
+memory
+opt
+techmap
+opt
+
+# Stats and a clean text dump for the oracle to parse.
+tee -o scenarios/rtl_demo/reports/stat.txt    stat -top cmd_alu
+tee -o scenarios/rtl_demo/reports/synth.log   printattrs cmd_alu
+write_verilog -noattr scenarios/rtl_demo/reports/cmd_alu_synth.v

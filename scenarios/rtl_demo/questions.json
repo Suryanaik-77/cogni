@@ -1,0 +1,54 @@
+{
+  "questions": [
+    {
+      "id": "q1_latch_count",
+      "stage": "rtl",
+      "question": "After Verilator lint of cmd_alu.sv (a hand-written 150-line FSM+ALU with one always_comb that conditionally assigns result_o, and a case statement on opcode_i without a default branch driving flag_o), how many distinct latches will be inferred?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.latch.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "q2_case_incomplete",
+      "stage": "rtl",
+      "question": "How many always_comb case statements in cmd_alu.sv lack a default branch and therefore drive a latch on the assigned signal?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.case_incomplete.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "q3_blkseq",
+      "stage": "rtl",
+      "question": "How many blocking-assignment-inside-always_ff hazards exist in cmd_alu.sv, given that the FSM register update (state_q) and reset both use '=' instead of '<='?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.blkseq.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "q4_width_mismatch",
+      "stage": "rtl",
+      "question": "How many width-mismatch lint warnings will Verilator emit for cmd_alu.sv, given a single statement 'sum_w = a_i + k_i' where a_i is 32-bit and k_i is 8-bit?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.width.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "q5_synth_latch_warning",
+      "stage": "rtl",
+      "question": "If cmd_alu.sv is pushed unchanged into Yosys generic synthesis, how many latch warnings will Yosys emit (downstream consequence of the RTL-stage hazards)?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "synth.warnings.latch",
+        "tolerance": 0
+      }
+    }
+  ]
+}

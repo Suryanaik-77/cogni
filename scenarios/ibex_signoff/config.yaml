@@ -1,0 +1,28 @@
+name: ibex_signoff
+domain: vlsi
+description: |
+  Re-run of the cognipd v1 Ibex synthesis-prediction trial under the new
+  cognitive framework. Same RTL, same Yosys oracle, same questions.
+  Goal: prove the new agent at least matches v1's 11/13 hit rate and
+  produces honest refusals + KB edits where v1 had none.
+
+# --- Adapter pair (stage + tool) ---
+# The agent core knows nothing about EDA tools; the (stage, tool) pair
+# picks a perceiver+oracle from cogni.adapters. To move this scenario to
+# another synth tool (e.g. Design Compiler), change `tool`.
+stage: synth
+tool:  yosys
+
+# Where the design lives
+rtl_root: /home/user/workspace/cognipd/design/ibex
+
+# Knowledge pack
+pack_path: /home/user/workspace/cogni/packs/vlsi/rules.json
+
+# Oracle config (passed through to the synth/yosys oracle constructor)
+oracle:
+  reports_dir:   /home/user/workspace/cognipd/design/ibex/reports
+  findings_path: /home/user/workspace/cognipd/runs/synth_findings.json
+
+# Confidence floor (UNCERTAIN means: anything UNCERTAIN or above is allowed)
+confidence_floor: uncertain

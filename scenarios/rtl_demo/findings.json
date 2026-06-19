@@ -1,0 +1,38 @@
+{
+  "rtl.lint.latch.count": 2,
+  "rtl.lint.latch.locations": [
+    {"file": "rtl/cmd_alu.sv", "line": 102, "signal": "result_o", "cause": "always_comb missing else (H1)"},
+    {"file": "rtl/cmd_alu.sv", "line": 113, "signal": "flag_o",   "cause": "case without default (H2)"}
+  ],
+  "rtl.lint.case_incomplete.count": 1,
+  "rtl.lint.case_incomplete.locations": [
+    {"file": "rtl/cmd_alu.sv", "line": 113, "block": "flag computation case", "cause": "no default branch (H2)"}
+  ],
+  "rtl.lint.fsm_no_default.count": 0,
+  "rtl.lint.blkseq.count": 2,
+  "rtl.lint.blkseq.locations": [
+    {"file": "rtl/cmd_alu.sv", "line": 77, "signal": "state_q", "cause": "blocking '=' inside always_ff reset (H3)"},
+    {"file": "rtl/cmd_alu.sv", "line": 83, "signal": "state_q", "cause": "blocking '=' inside always_ff next-state (H3)"}
+  ],
+  "rtl.lint.width.count": 1,
+  "rtl.lint.width.locations": [
+    {"file": "rtl/cmd_alu.sv", "line": 131, "expr": "a_i + k_i", "lhs_width": 32, "rhs_width": 8, "cause": "implicit width extension (H4)"}
+  ],
+  "rtl.lint.cdc_unsync.count": 0,
+  "rtl.lint.cdc_multibit.count": 0,
+  "rtl.lint.async_uncontrollable.count": 0,
+  "rtl.lint.gated_clock.count": 0,
+  "rtl.lint.implicit_net.count": 0,
+  "rtl.lint.multidriven.count": 0,
+  "rtl.lint.unoptflat.count": 0,
+  "rtl.lint.full_case_pragma.count": 0,
+  "rtl.lint.invented_primitive.count": 0,
+  "rtl.lint.defparam_or_define_config.count": 0,
+  "rtl.lint.hierref.count": 0,
+  "rtl.lint.nonsynth.count": 0,
+  "rtl.lint.unreachable_state.count": 0,
+  "rtl.lint.rdc.count": 0,
+  "synth.warnings.elab_failure": 0,
+  "synth.warnings.latch": 2,
+  "synth.warnings.width": 1
+}

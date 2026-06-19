@@ -1,0 +1,2805 @@
+{
+  "pack": "rtl",
+  "version": "1.0.0",
+  "schema": "kb-rule/v1",
+  "description": "Causal + structural RTL rules covering coding hygiene, FSMs, CDC/RDC, synthesizability, AI-origin hazards, DFT, and shift-left PPA prediction.",
+  "stages": [
+    "rtl",
+    "synth"
+  ],
+  "tools": [
+    "verilator",
+    "slang",
+    "yosys"
+  ],
+  "key_index": {
+    "rtl.lint.latch.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Inferred-latch count from Verilator/slang lint"
+    },
+    "rtl.lint.blkseq.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Blocking-in-sequential lint warnings"
+    },
+    "rtl.lint.implicit_net.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Implicit net / undeclared signal lint warnings"
+    },
+    "rtl.lint.width.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Width-mismatch / truncation lint warnings"
+    },
+    "rtl.lint.case_incomplete.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Case-incomplete lint warnings"
+    },
+    "rtl.lint.multidriven.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Multi-driver / multidriven net lint warnings"
+    },
+    "rtl.lint.unoptflat.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Combinational loop / unoptimizable-flat lint warnings"
+    },
+    "rtl.lint.hierref.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Hierarchical reference lint warnings"
+    },
+    "rtl.lint.nonsynth.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Non-synthesizable construct lint warnings"
+    },
+    "rtl.lint.full_case_pragma.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Legacy full_case/parallel_case pragma occurrences"
+    },
+    "rtl.lint.fsm_no_default.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "FSMs lacking explicit default/reset state"
+    },
+    "rtl.lint.unreachable_state.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "FSM unreachable / dead state count"
+    },
+    "rtl.lint.gated_clock.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Hand-rolled gated/derived clock lint occurrences"
+    },
+    "rtl.lint.cdc_unsync.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Single-bit CDC paths without 2-FF synchronizer"
+    },
+    "rtl.lint.cdc_multibit.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Multi-bit CDC paths without protocol/FIFO/Gray"
+    },
+    "rtl.lint.rdc.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Reset-domain-crossing lint findings"
+    },
+    "rtl.lint.async_uncontrollable.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Asynchronous controls not test-controllable"
+    },
+    "rtl.lint.defparam_or_define_config.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Configuration via defparam or `define instead of typed parameters"
+    },
+    "rtl.lint.invented_primitive.count": {
+      "type": "int",
+      "unit": "count",
+      "description": "AI-emitted primitives not resolvable to any approved library/template"
+    },
+    "rtl.fsm.encoding_declared": {
+      "type": "bool",
+      "unit": null,
+      "description": "Whether nontrivial FSMs have an explicitly declared encoding"
+    },
+    "rtl.fsm.two_process_style": {
+      "type": "bool",
+      "unit": null,
+      "description": "Whether FSMs use the two-process state-defaults style"
+    },
+    "rtl.module.max_comb_depth": {
+      "type": "int",
+      "unit": "levels",
+      "description": "Maximum register-to-register combinational depth"
+    },
+    "rtl.module.max_fanout": {
+      "type": "int",
+      "unit": "count",
+      "description": "Maximum control-net fanout in the module"
+    },
+    "rtl.register_bits": {
+      "type": "int",
+      "unit": "bits",
+      "description": "Total RTL register bits (FF proxy)"
+    },
+    "rtl.memory_template_match": {
+      "type": "bool",
+      "unit": null,
+      "description": "Memory arrays match an inference-friendly template"
+    },
+    "rtl.operator_max_bitwidth": {
+      "type": "int",
+      "unit": "bits",
+      "description": "Maximum bitwidth of arithmetic operators"
+    },
+    "rtl.clock_gating_candidate_groups": {
+      "type": "int",
+      "unit": "count",
+      "description": "Number of register groups sharing a low-activity enable"
+    },
+    "synth.warnings.latch": {
+      "type": "int",
+      "unit": "count",
+      "description": "Yosys/synth latch warning count"
+    },
+    "synth.warnings.width": {
+      "type": "int",
+      "unit": "count",
+      "description": "Synth width-mismatch warning count"
+    },
+    "synth.warnings.multidriven": {
+      "type": "int",
+      "unit": "count",
+      "description": "Synth multidriven net warning count"
+    },
+    "synth.warnings.elab_failure": {
+      "type": "int",
+      "unit": "count",
+      "description": "Synth elaboration failure count"
+    },
+    "synth.fsm_extracted": {
+      "type": "bool",
+      "unit": null,
+      "description": "Whether FSM extraction matched declared encoding"
+    },
+    "synth.icg_inserted_count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Inserted integrated clock-gating cells"
+    },
+    "synth.dsp_inferred_count": {
+      "type": "int",
+      "unit": "count",
+      "description": "DSP/MAC blocks inferred during synthesis"
+    },
+    "synth.memory_impl_class": {
+      "type": "str",
+      "unit": null,
+      "description": "Inferred memory implementation: ff_ram | lutram | bram"
+    },
+    "synth.total_cell_area_um2": {
+      "type": "float",
+      "unit": "um^2",
+      "description": "Sum of stdcell areas after synth"
+    },
+    "synth.ff_count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Post-synth flip-flop count"
+    },
+    "synth.top_module_by_cells": {
+      "type": "str",
+      "unit": null,
+      "description": "Largest module by cell count"
+    },
+    "sta.wns_ps": {
+      "type": "float",
+      "unit": "ps",
+      "description": "Setup worst negative slack"
+    },
+    "sta.tns_ps": {
+      "type": "float",
+      "unit": "ps",
+      "description": "Setup total negative slack"
+    },
+    "sta.failing_endpoints": {
+      "type": "int",
+      "unit": "count",
+      "description": "Number of failing timing endpoints"
+    },
+    "sta.hold_violations": {
+      "type": "int",
+      "unit": "count",
+      "description": "Hold-time violation count"
+    },
+    "sta.reset_recovery_removal_violations": {
+      "type": "int",
+      "unit": "count",
+      "description": "Reset recovery/removal STA violations"
+    },
+    "pnr.congestion_h_pct": {
+      "type": "float",
+      "unit": "pct",
+      "description": "Horizontal routing congestion percentage"
+    },
+    "pnr.congestion_v_pct": {
+      "type": "float",
+      "unit": "pct",
+      "description": "Vertical routing congestion percentage"
+    },
+    "sim.coverage.fsm_state_pct": {
+      "type": "float",
+      "unit": "pct",
+      "description": "FSM-state coverage percentage"
+    },
+    "sim.race_condition_count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Detected simulator race-order divergences"
+    },
+    "sim.x_propagation_escapes": {
+      "type": "int",
+      "unit": "count",
+      "description": "X-propagation escapes vs gate-level reference"
+    },
+    "sim.cdc_intermittent_failures": {
+      "type": "int",
+      "unit": "count",
+      "description": "Intermittent CDC failures observed in sim/lab"
+    },
+    "power.total_mw": {
+      "type": "float",
+      "unit": "mw",
+      "description": "Total estimated power"
+    },
+    "power.clock_mw": {
+      "type": "float",
+      "unit": "mw",
+      "description": "Clock-tree dynamic power"
+    },
+    "dft.scan_coverage_pct": {
+      "type": "float",
+      "unit": "pct",
+      "description": "ATPG/scan stuck-at coverage"
+    },
+    "dft.uncontrollable_async_count": {
+      "type": "int",
+      "unit": "count",
+      "description": "Async controls not controllable in test mode"
+    }
+  },
+  "rules": [
+    {
+      "id": "r_rtl_comb_total_assignment",
+      "version": 1,
+      "statement": "Every signal written inside an always_comb block must be assigned on every control path, typically via defaults at block entry then selective overrides; path-incomplete always_comb infers latches.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any",
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.always_comb_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.latch.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "rtl.lint.case_incomplete.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "Path-complete combinational assignment eliminates inferred latches before synth, avoiding silent CDC/STA hazards downstream.",
+          "estimated_cost_saved_hours": 14
+        },
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.x_propagation_escapes",
+          "mechanism": "Default-then-override prevents X retention through latches and reduces RTL/gate divergence.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "Modern lint stacks treat incomplete combinational assignment as a first-order bug class because it creates storage where the reader expects pure logic. AI-generated RTL frequently misses the closing else/default arm; defaulting at block entry is the cheapest defense.",
+      "citations": [
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": [],
+      "examples": {
+        "violating": [
+          "always_comb begin\n  if (sel) y = a;\n  // missing else -> latch on y\nend"
+        ],
+        "compliant": [
+          "always_comb begin\n  y = '0;\n  if (sel) y = a;\nend"
+        ]
+      }
+    },
+    {
+      "id": "r_rtl_assignment_discipline_by_process_type",
+      "version": 1,
+      "statement": "Sequential blocks must use always_ff with non-blocking assignments; combinational blocks must use always_comb with blocking assignments. Mixing the styles is a bug unless a specific reviewed idiom requires otherwise.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.always_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.blkseq.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.race_condition_count",
+          "mechanism": "Discipline eliminates blocking-in-sequential schedule races and synthesis-vs-sim divergence at the source.",
+          "estimated_cost_saved_hours": 7
+        },
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "Correct process-type pairing prevents accidental latch inference and synthesis intent ambiguity.",
+          "estimated_cost_saved_hours": 4
+        }
+      ],
+      "rationale": "lowRISC codifies sequential-uses-NBA / combinational-uses-blocking; Verilator keeps dedicated diagnostics for blocking-in-sequential and delayed-combinational misuse because these patterns correlate with hard-to-debug mismatches. Yosys also recommends restricting designs to standard always-block forms.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "2. Basic principles \u2014 YosysHQ Docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.39/CHAPTER_Basics.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_explicit_nets_and_logic_types",
+      "version": 1,
+      "statement": "Declare every signal explicitly and prefer logic for synthesizable RTL; pair this with `default_nettype none` so typos fail fast instead of silently creating implicit one-bit nets.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.implicit_net.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.race_condition_count",
+          "mechanism": "Explicit declarations prevent typo-induced floating nets and accidental one-bit truncations from reaching simulation.",
+          "estimated_cost_saved_hours": 5
+        }
+      ],
+      "rationale": "lowRISC explicitly forbids inferred nets and prefers logic over reg/wire for synthesis-facing code, exactly the posture adopted by OpenTitan's lint-clean flow. AI-assisted flows benefit disproportionately because generated code drifts on declaration detail unless a strict type barrier is present.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "OpenTitan hardware methodology",
+          "url": "https://opentitan.org/book/doc/contributing/hw/methodology.html"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_width_and_signedness_are_explicit",
+      "version": 1,
+      "statement": "Arithmetic widths, literal widths, and signedness must be explicit at the point of use, especially around adds, shifts, concatenations, compares, and port hookups, since SystemVerilog otherwise permits silent zero/sign-extension or truncation.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.width.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "synth.warnings.width",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.width",
+          "mechanism": "Explicit widths/signs eliminate WIDTHEXPAND/WIDTHTRUNC warnings at synth and prevent silent datapath truncation bugs.",
+          "estimated_cost_saved_hours": 10
+        }
+      ],
+      "rationale": "Verilator splits width problems into truncation and expansion classes \u2014 strong signal that 'works in sim' is not enough for numerically sensitive RTL. Verible and lowRISC make explicit widths a low-friction lint gate.",
+      "citations": [
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "verible-verilog-lint",
+          "url": "https://chipsalliance.github.io/verible/verilog_lint.html"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_reset_strategy_is_uniform_per_domain",
+      "version": 1,
+      "statement": "Each clock/reset domain must commit to a documented reset strategy and polarity; if asynchronous assertion is used, deassertion must be locally synchronized per clock domain rather than floating asynchronously through the fabric.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.rdc.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.reset_recovery_removal_violations",
+          "mechanism": "Synchronized reset deassertion eliminates recovery/removal violations and reset-release metastability classes.",
+          "estimated_cost_saved_hours": 24
+        },
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.cdc_intermittent_failures",
+          "mechanism": "Per-domain reset strategy avoids cross-module polarity bugs and RDC escapes that surface as intermittent lab failures.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "Cummings' reset guidance is still the clearest statement: async reset assertion can be fine, but async removal without a synchronizer is not. Siemens' RDC view brings the modern SoC angle: multiple async reset sources create a verification space CDC checks alone do not cover.",
+      "citations": [
+        {
+          "title": "2. Basic principles \u2014 YosysHQ Docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.39/CHAPTER_Basics.html"
+        },
+        {
+          "title": "Synchronous Resets? Asynchronous Resets? I am so confused...",
+          "url": "https://lcdm-eng.com/papers/snug02_Resets1.pdf"
+        },
+        {
+          "title": "Navigating Reset Domain Crossings to Safety in Complex SoCs",
+          "url": "https://blogs.sw.siemens.com/verificationhorizons/2024/05/21/navigating-reset-domain-crossings-to-safety-in-complex-socs/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_x_sensitive_decoding_uses_defaults_and_assertions",
+      "version": 1,
+      "statement": "Decode logic must pair full output defaults with explicit illegal-condition handling, and any wildcard match must include assertions that trap X/Z on the selector \u2014 sloppy casex/casez can make RTL look deterministic while post-synth diverges.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.case_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.case_incomplete.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.x_propagation_escapes",
+          "mechanism": "Explicit defaults and X-trap assertions prevent X-optimism escapes and false decoder hits after reset.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "The SNUG latch-gotchas paper shows how X/Z in the case expression can select the wrong arm under casex/casez, and why pre-case defaults are the safest latch-prevention pattern. lowRISC's prohibition on X-coded RTL behavior and Verilator's CASEINCOMPLETE diagnostics make this rule easy to enforce.",
+      "citations": [
+        {
+          "title": "Yet Another Latch and Gotchas Paper",
+          "url": "https://lcdm-eng.com/papers/snug12_Paper_final.pdf"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_unique_priority_used_only_for_true_intent",
+      "version": 1,
+      "statement": "Use unique, unique0, or priority only when they match real hardware intent; never use the legacy full_case or parallel_case pragmas \u2014 modern keywords add cross-tool checking while the old pragmas cause sim-synth mismatches.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.full_case_pragma.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "Eliminating full_case/parallel_case pragmas makes RTL intent visible to both simulator and synthesizer, preventing optimized-away enables and silent decoder semantics drift.",
+          "estimated_cost_saved_hours": 24
+        }
+      ],
+      "rationale": "Cummings' 'evil twins' paper remains the canonical warning that comment pragmas can alter synthesis semantics without giving the simulator the same information. VerilogPro and lowRISC show how to keep the benefit of unique/priority while avoiding cargo-culted keyword usage.",
+      "citations": [
+        {
+          "title": "A Solution to Verilog's full_case parallel_case Evil Twins",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/1Sunburst%20Design/SystemVerilog's%20priority%20&%20unique%20-%20A%20Solution%20to%20Verilog's%20full_case%20&%20parallel_case%20Evil%20Twins!.pdf"
+        },
+        {
+          "title": "SystemVerilog Unique And Priority - How Do I Use Them?",
+          "url": "https://www.verilogpro.com/systemverilog-unique-priority/"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_one_driver_per_signal_no_comb_loops",
+      "version": 1,
+      "statement": "A synthesizable design signal must have one clear driver and must not participate in combinational feedback unless that loop is a reviewed intentional construct \u2014 multi-driven nets and comb loops degrade tool predictability and DFT friendliness.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.multidriven.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "rtl.lint.unoptflat.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.multidriven",
+          "mechanism": "One-driver discipline prevents synth multidriven warnings, oscillation hazards, and scan/ATPG blockers downstream.",
+          "estimated_cost_saved_hours": 14
+        }
+      ],
+      "rationale": "Verilator explicitly names MULTIDRIVEN, ALWCOMBORDER, and UNOPTFLAT because these constructs degrade simulation clarity and downstream optimization quality. OpenTitan's lint-clean signoff posture makes 'one signal, one obvious owner' a scalable review rule rather than a taste preference.",
+      "citations": [
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "OpenTitan hardware methodology",
+          "url": "https://opentitan.org/book/doc/contributing/hw/methodology.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_fsm_encoding_is_declared_not_implied",
+      "version": 1,
+      "statement": "Every nontrivial FSM must declare its intended encoding explicitly (binary, one-hot, gray, or user-defined) rather than leaving the choice ambiguous \u2014 explicit encoding makes synthesis intent testable.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.fsms"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.fsm.encoding_declared",
+          "channel": "enum",
+          "value": [
+            true,
+            "true",
+            "yes"
+          ],
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.fsm_extracted",
+          "mechanism": "Declared encoding makes the synthesis FSM-extraction outcome predictable and reviewable rather than tool-dependent.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "lowRISC requires enum-based FSM coding; AMD exposes explicit fsm_extraction controls because encoding style changes the implementation, not just the look. VerilogPro's one-hot examples reinforce that encoding choice must be visible at source level.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "One-hot State Machine in SystemVerilog",
+          "url": "https://www.verilogpro.com/systemverilog-one-hot-state-machine/"
+        },
+        {
+          "title": "Running Synthesis with Tcl - UG901",
+          "url": "https://docs.amd.com/r/2024.1-English/ug901-vivado-synthesis/Running-Synthesis-with-Tcl"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_two_process_fsm_with_state_defaults",
+      "version": 1,
+      "statement": "Prefer the classic two-process FSM style: a registered state block plus a combinational next-state/output block whose first action is state_d = state_q plus full output defaults \u2014 this minimizes latch risk and surfaces missing transitions.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.fsms"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.fsm.two_process_style",
+          "channel": "enum",
+          "value": [
+            true,
+            "true",
+            "yes"
+          ],
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "rtl.lint.latch.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "Two-process style with state defaults prevents missed transitions and partial assignments that synthesize as latches.",
+          "estimated_cost_saved_hours": 10
+        }
+      ],
+      "rationale": "Cummings' FSM guidance and lowRISC's style both converge on keeping the sequential state register simple and putting transition logic in a block where defaults are explicit. Verilator's latch and case warnings become much more actionable when this structure is present.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "State Machine Coding Styles for Synthesis",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/Clifford%20E.%20Cummings'%20Paper/02.FSM/1998-State%20Machine%20Coding%20Styles%20for%20Synthesis.pdf"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_onehot_legality_is_checked_not_assumed",
+      "version": 1,
+      "statement": "One-hot FSMs must keep legal-state assumptions visible and checkable; do not trust illegal-state recovery to a casual default arm under unique case \u2014 synthesis can optimize around those assumptions, making 'recover to IDLE' less real than it looks in RTL.",
+      "kind": "heuristic",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.onehot_fsms"
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.fsm_extracted",
+          "mechanism": "Visible legal-state assertions and absence of unique-case-dependent recovery prevent parasitic exit logic and SEU-recovery surprises.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "VerilogPro warns that unique case can override 'default to IDLE' recovery expectations in one-hot code. Cummings' unique/priority guidance explains why: the keyword communicates strong assumptions to synthesis, not just to the simulator.",
+      "citations": [
+        {
+          "title": "One-hot State Machine in SystemVerilog",
+          "url": "https://www.verilogpro.com/systemverilog-one-hot-state-machine/"
+        },
+        {
+          "title": "A Solution to Verilog's full_case parallel_case Evil Twins",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/1Sunburst%20Design/SystemVerilog's%20priority%20&%20unique%20-%20A%20Solution%20to%20Verilog's%20full_case%20&%20parallel_case%20Evil%20Twins!.pdf"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_fsm_has_known_reset_and_no_unreachable_sink_states",
+      "version": 1,
+      "statement": "An FSM must reset into exactly one known legal state and must be checked for unreachable, terminal, and unhandled encodings \u2014 'default catches it' is not the same as proving the state graph is complete.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.fsms"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.fsm_no_default.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "rtl.lint.unreachable_state.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.coverage.fsm_state_pct",
+          "mechanism": "Eliminating unreachable/sink states ensures FSM coverage closes and avoids stuck-controller silicon bugs.",
+          "estimated_cost_saved_hours": 14
+        }
+      ],
+      "rationale": "Older SNUG FSM literature stresses symbolic state definition, explicit reset state, and complete next-state logic as synthesis-facing concerns. In a modern flow, lint-clean CI makes dead or unhandled state encodings cheap to catch before they become waveform archaeology.",
+      "citations": [
+        {
+          "title": "State Machine Coding Styles for Synthesis",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/Clifford%20E.%20Cummings'%20Paper/02.FSM/1998-State%20Machine%20Coding%20Styles%20for%20Synthesis.pdf"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "OpenTitan hardware methodology",
+          "url": "https://opentitan.org/book/doc/contributing/hw/methodology.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_single_bit_cdc_uses_registered_source_and_2ff_sync",
+      "version": 1,
+      "statement": "A single-bit CDC control must be registered in the source domain and synchronized in the destination with a 2-FF synchronizer (3-FF when MTBF pressure justifies) \u2014 never feed raw combinational control across the boundary.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.cdc_paths"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.cdc_unsync.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.cdc_intermittent_failures",
+          "mechanism": "Source-register + 2-FF synchronizer eliminates metastability propagation and pulse loss at the boundary, removing a class of intermittent silicon failures.",
+          "estimated_cost_saved_hours": 32
+        }
+      ],
+      "rationale": "Cummings' CDC paper is still the practical baseline: source-register first, then 2-FF synchronize, widening to 3-FF only when MTBF math says 2-FF isn't enough. Asynchronous boundaries create fault modes that ordinary RTL simulation under-covers.",
+      "citations": [
+        {
+          "title": "Clock Domain Crossing CDC Design Verification SystemVerilog",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/Clifford%20E.%20Cummings'%20Paper/04.SystemVerilog/2008-Clock%20Domain%20Crossing%20(CDC)%20Design%20&%20Verification%20Techniques%20Using%20SystemVerilog.pdf"
+        },
+        {
+          "title": "Navigating Reset Domain Crossings to Safety in Complex SoCs",
+          "url": "https://blogs.sw.siemens.com/verificationhorizons/2024/05/21/navigating-reset-domain-crossings-to-safety-in-complex-socs/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_multibit_cdc_uses_protocol_not_bitwise_sync",
+      "version": 1,
+      "statement": "Multi-bit data or correlated multi-control CDC must use a handshake, toggle-plus-data MCP, Gray coding, or async FIFO \u2014 never synchronize bit-by-bit as if each wire were an independent flag.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.cdc_paths"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.cdc_multibit.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.cdc_intermittent_failures",
+          "mechanism": "Protocol-based multi-bit CDC prevents skewed bus capture, false full/empty conditions, and reconvergence bugs that survive bit-level synchronization.",
+          "estimated_cost_saved_hours": 32
+        }
+      ],
+      "rationale": "Cummings gives concrete failure cases for independently synchronized multi-bit controls and the safe alternatives \u2014 consolidation, MCP, Gray code, FIFO. The shift-left survey reinforces that early structural CDC checking belongs in RTL practice.",
+      "citations": [
+        {
+          "title": "Clock Domain Crossing CDC Design Verification SystemVerilog",
+          "url": "http://staff.ustc.edu.cn/~wyu0725/FPGA/snug_collection/Clifford%20E.%20Cummings'%20Paper/04.SystemVerilog/2008-Clock%20Domain%20Crossing%20(CDC)%20Design%20&%20Verification%20Techniques%20Using%20SystemVerilog.pdf"
+        },
+        {
+          "title": "Shift-Left Techniques in EDA Survey",
+          "url": "https://arxiv.org/html/2509.14551v1"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_rdc_is_a_first_class_design_rule",
+      "version": 1,
+      "statement": "Reset-domain crossing must be treated with the same seriousness as CDC \u2014 async reset release synchronized per receiving clock domain and paths between unlike reset domains reviewed with dedicated RDC methodology.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.reset_domains"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.rdc.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.reset_recovery_removal_violations",
+          "mechanism": "Per-domain reset synchronization eliminates STA recovery/removal violations and reset-release metastability classes.",
+          "estimated_cost_saved_hours": 24
+        },
+        {
+          "downstream_stage": "signoff",
+          "downstream_key": "dft.scan_coverage_pct",
+          "mechanism": "Cleaning RDC at RTL avoids ATPG cleanup churn from uncontrolled async reset paths.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "Cummings makes the electrical point: async reset removal is itself an asynchronous event needing synchronization. Siemens extends this to modern SoCs as its own signoff discipline; Tessent shows uncontrolled async resets also degrade testability.",
+      "citations": [
+        {
+          "title": "Synchronous Resets? Asynchronous Resets? I am so confused...",
+          "url": "https://lcdm-eng.com/papers/snug02_Resets1.pdf"
+        },
+        {
+          "title": "Navigating Reset Domain Crossings to Safety in Complex SoCs",
+          "url": "https://blogs.sw.siemens.com/verificationhorizons/2024/05/21/navigating-reset-domain-crossings-to-safety-in-complex-socs/"
+        },
+        {
+          "title": "DFT architectural tips testing of asynchronous sets resets",
+          "url": "https://blogs.sw.siemens.com/tessent/2019/07/24/dft-architectural-tips-testing-of-asynchronous-sets-resets/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_avoid_ad_hoc_derived_or_gated_clocks",
+      "version": 1,
+      "statement": "Avoid hand-rolled derived or gated clocks in RTL for ordinary control purposes; prefer clock-enable semantics \u2014 direct logic in the clock path creates glitch, skew, and analysis problems that synthesis tools convert back into enables anyway.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.gated_clock.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.hold_violations",
+          "mechanism": "Avoiding hand-gated clocks eliminates skew-driven hold failures and CDC/constraint noise that surface only in STA.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "AMD's guidance is blunt: convert clock gating logic to clock enables when possible because it maps better to clock resources and simplifies timing analysis. Recent writeups from 24x7FPGA and Antmicro show why ad-hoc logic is brittle and why modern flows prefer ICG insertion or auto-gating.",
+      "citations": [
+        {
+          "title": "Converting Clock Gating to Clock Enable - AMD UG949",
+          "url": "https://docs.amd.com/r/en-US/ug949-vivado-design-methodology/Converting-Clock-Gating-to-Clock-Enable"
+        },
+        {
+          "title": "Clock Gating - 24x7FPGA",
+          "url": "https://24x7fpga.com/rtl_directory/2024_09_13_12_36_11_clock_gating/"
+        },
+        {
+          "title": "Implementing automatic clock gating in OpenROAD",
+          "url": "https://antmicro.com/blog/2025/07/automatic-clock-gating-in-openroad/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_dut_rtl_stays_within_synthesizable_subset",
+      "version": 1,
+      "statement": "Design RTL must stay inside the standard synthesizable subset; exclude behavioral conveniences like timing delays in RTL processes, force/release, or fork...join concurrency that belongs in verification code.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.nonsynth.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "synth.warnings.elab_failure",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.elab_failure",
+          "mechanism": "Restricting RTL to the synthesizable subset prevents tool-specific elaboration failures and silent semantic divergence between simulators and synthesizers.",
+          "estimated_cost_saved_hours": 9
+        }
+      ],
+      "rationale": "Yosys recommends limiting new designs to standardized always forms because those are the cases all synthesis tools agree on. Verilator's warnings around delayed procedural constructs and forked lifetimes underscore that even 'just for convenience' syntax pushes code out of the safe portable subset.",
+      "citations": [
+        {
+          "title": "2. Basic principles \u2014 YosysHQ Docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.39/CHAPTER_Basics.html"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_no_hierarchical_refs_in_synth_rtl",
+      "version": 1,
+      "statement": "Synthesizable RTL must not read or write internal signals of another module via hierarchical references; cross-module connectivity must be expressed through ports, interfaces, or package-visible constants.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.hierref.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.elab_failure",
+          "mechanism": "Eliminating hierarchical references avoids HIERPARAM-class elaboration errors and hierarchy-coupled ECO pain across tools.",
+          "estimated_cost_saved_hours": 10
+        }
+      ],
+      "rationale": "lowRISC flatly prohibits hierarchical references in synthesizable RTL because they undermine modularity and tool compatibility. Verilator's HIERPARAM error shows the same issue at elaboration: these shortcuts quickly become impossible to support consistently.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_configuration_uses_parameters_not_preprocessor_state",
+      "version": 1,
+      "statement": "Module configurability must use typed parameter/localparam or package constants rather than design-shaping `define macros or defparam \u2014 elaboration-time parameters are visible to tools and review while preprocessor state is global, textual, and easy to misuse.",
+      "kind": "constraint",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any",
+          "legacy_imported"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.defparam_or_define_config.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.elab_failure",
+          "mechanism": "Typed parameterization makes build variants traceable and reproducible at synth time, eliminating hidden global preprocessor dependencies.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "lowRISC's style guide is explicit that `define should never parameterize a module and that typed parameters are preferred for safety and readability. Mainstream 2025 explanatory material still emphasizes the same point \u2014 the failure mode remains common.",
+      "citations": [
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "Understanding define parameter localparam in SystemVerilog",
+          "url": "https://vlsiworlds.com/system-verilog/understanding-define-parameter-and-localparam-in-systemverilog/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_reg_to_reg_comb_depth_is_a_first_order_timing_signal",
+      "version": 1,
+      "statement": "Long register-to-register combinational depth at RTL is an early timing-debt signal: deeper stages tend to correlate with worse downstream WNS/TNS unless later pipelined or rebalanced.",
+      "kind": "tendency",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "gt",
+          "key": "rtl.module.max_comb_depth",
+          "value": 12
+        }
+      ],
+      "unless": [
+        {
+          "op": "lt",
+          "key": "target.fmax_ghz",
+          "value": 0.5
+        }
+      ],
+      "predicts": [
+        {
+          "measurement_key": "sta.wns_ps",
+          "channel": "intervals",
+          "value": {
+            "min": -1000000,
+            "max": 0,
+            "unit": "ps"
+          },
+          "horizon": "sta"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.failing_endpoints",
+          "mechanism": "Detecting deep comb chains at RTL flags re-pipelining work before synth, avoiding a costly STA-driven re-RTL cycle.",
+          "estimated_cost_saved_hours": 32
+        }
+      ],
+      "rationale": "RTL-Timer reports correlation above 0.89 with post-optimization WNS/TNS gains, strong evidence that structural timing signals are present in RTL. RTLDistil, MasterRTL, and the 2025 shift-left survey all reinforce that timing is now a predictable RTL-stage property.",
+      "citations": [
+        {
+          "title": "Annotating Slack Directly on Your Verilog",
+          "url": "https://arxiv.org/abs/2403.18453"
+        },
+        {
+          "title": "Bridging Layout and RTL Knowledge Distillation Timing Prediction",
+          "url": "https://proceedings.mlr.press/v267/wang25dn.html"
+        },
+        {
+          "title": "MasterRTL Pre-Synthesis PPA Estimation",
+          "url": "https://arxiv.org/abs/2311.08441"
+        },
+        {
+          "title": "Shift-Left Techniques in EDA Survey",
+          "url": "https://arxiv.org/html/2509.14551v1"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_rtl_fanout_and_hot_hierarchy_predict_congestion",
+      "version": 1,
+      "statement": "Wide-spread control nets, giant mux cones, and modules with disproportionate fan-in/fan-out should be flagged at RTL as congestion candidates \u2014 commercial physically aware tools and open flows surface congestion, max-fanout, and hierarchy hotspots as meaningful pre-route indicators.",
+      "kind": "tendency",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "gt",
+          "key": "rtl.module.max_fanout",
+          "value": 64
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "pnr",
+          "downstream_key": "pnr.congestion_h_pct",
+          "mechanism": "RTL-stage fanout and hot-hierarchy flags let floorplanning and buffering address congestion before route, saving PnR iterations.",
+          "estimated_cost_saved_hours": 16
+        },
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.hold_violations",
+          "mechanism": "Early fanout limits reduce post-route hold-fix detours and buffering explosion.",
+          "estimated_cost_saved_hours": 12
+        }
+      ],
+      "rationale": "RTL Architect explicitly aggregates timing, power, and congestion by hierarchy and source line, an endorsement that RTL structure predicts physical stress points. AMD and OpenROAD document the same downstream symptoms via congested regions, top modules, and max-fanout metrics.",
+      "citations": [
+        {
+          "title": "Optimizing the RTL Design Flow with Real-Time PPA Analysis",
+          "url": "https://www.synopsys.com/blogs/chip-design/optimizing-rtl-design-flow-real-time-ppa-analysis.html"
+        },
+        {
+          "title": "Addressing Congestion - UG949",
+          "url": "https://docs.amd.com/r/en-US/ug949-vivado-design-methodology/Addressing-Congestion"
+        },
+        {
+          "title": "OpenROAD documentation",
+          "url": "https://openroad.readthedocs.io/en/latest/main/README.html"
+        },
+        {
+          "title": "Shift-Left Techniques in EDA Survey",
+          "url": "https://arxiv.org/html/2509.14551v1"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_register_bits_are_a_first_order_ff_count_proxy",
+      "version": 1,
+      "statement": "RTL register bits are a near-linear proxy for post-synthesis flip-flop count, with the caveat that retiming, shift-register extraction, RAM inference, and register merging change the exact multiplier.",
+      "kind": "identity",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.register_bits"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "synth.ff_count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 1000000
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cell_area_um2",
+          "mechanism": "Calibrated FF-count proxy at RTL lets early area/power budgeting be reliable enough to drive architectural decisions.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "PRIMAL states a one-to-one correspondence between RTL and gate-level registers as the basis for learning power from RTL traces \u2014 empirical justification for using register-bit count as a first-order resource metric. CircuitFusion and synthesis options like retiming/SRL extraction explain why this stays a heuristic.",
+      "citations": [
+        {
+          "title": "PRIMAL Power Inference using Machine Learning",
+          "url": "https://research.nvidia.com/sites/default/files/pubs/2019-06_PRIMAL:-Power-Inference/24_1_Zhou_PRIMAL.pdf"
+        },
+        {
+          "title": "CircuitFusion",
+          "url": "https://arxiv.org/html/2505.02168v1"
+        },
+        {
+          "title": "Running Synthesis with Tcl - UG901",
+          "url": "https://docs.amd.com/r/2024.1-English/ug901-vivado-synthesis/Running-Synthesis-with-Tcl"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_memory_templates_are_written_for_intended_inference",
+      "version": 1,
+      "statement": "Arrays that are logically memories must be coded in inference-friendly templates whose read/write semantics match the desired implementation \u2014 read synchronicity, port pattern, and size dominate whether the structure lands in FF RAM, LUT/distributed RAM, or block RAM.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "yosys",
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.memory_arrays"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.memory_template_match",
+          "channel": "enum",
+          "value": [
+            true,
+            "true"
+          ],
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.memory_impl_class",
+          "mechanism": "Inference-template match drives correct memory implementation choice at synth, avoiding accidental FF-RAM blowups or missed BRAM inference.",
+          "estimated_cost_saved_hours": 16
+        },
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.total_cell_area_um2",
+          "mechanism": "Correct memory inference can swing area by orders of magnitude vs FF-RAM fallback; making the template explicit prevents that surprise.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "Yosys is unusually clear that asynchronous reads force LUT/FF-style memory while synchronous-read, supported-port templates can become block RAM. AMD documents the same behavior via RAM_STYLE and the sync-vs-async distinction between dedicated block RAM and distributed RAM.",
+      "citations": [
+        {
+          "title": "Memory handling YosysHQ Yosys 0.43",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.43/using_yosys/synthesis/memory.html"
+        },
+        {
+          "title": "RAM_STYLE - UG912",
+          "url": "https://docs.amd.com/r/2024.1-English/ug912-vivado-properties/RAM_STYLE"
+        },
+        {
+          "title": "Choosing Between Distributed RAM and Block RAM",
+          "url": "https://docs.amd.com/r/2024.2-English/ug901-vivado-synthesis/Choosing-Between-Distributed-RAM-and-Dedicated-Block-RAM?contentId=P5lJu6Y5~LTu~iWW~10fBQ"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_operator_width_and_pipeline_depth_drive_datapath_cost",
+      "version": 1,
+      "statement": "Wide arithmetic operators must be budgeted together with target throughput and pipeline depth \u2014 synthesis may infer DSPs or large logic structures based on width and timing pressure, and pipeline depth visibly trades area for speed.",
+      "kind": "tendency",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "gt",
+          "key": "rtl.operator_max_bitwidth",
+          "value": 16
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.dsp_inferred_count",
+          "mechanism": "Explicit width/pipeline budgeting at RTL guides DSP inference and prevents accidentally oversized datapaths or under-pipelined multiply stages.",
+          "estimated_cost_saved_hours": 10
+        },
+        {
+          "downstream_stage": "sta",
+          "downstream_key": "sta.wns_ps",
+          "mechanism": "Matching pipeline depth to operator width keeps the critical path inside the target period.",
+          "estimated_cost_saved_hours": 12
+        }
+      ],
+      "rationale": "AMD explicitly says multipliers and MAC forms are DSP-inference candidates subject to timing thresholds, so width and performance target both shape the final implementation. Ibex's 1- vs 3-cycle multiplier and writeback-stage configurations are concrete public examples of the same tradeoff.",
+      "citations": [
+        {
+          "title": "USE_DSP - UG901",
+          "url": "https://docs.amd.com/r/2024.1-English/ug901-vivado-synthesis/USE_DSP"
+        },
+        {
+          "title": "Ibex README",
+          "url": "https://github.com/lowRISC/ibex/blob/master/README.md"
+        },
+        {
+          "title": "Pipeline Details - Ibex",
+          "url": "https://ibex-core.readthedocs.io/en/latest/03_reference/pipeline_details.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_expose_clock_gating_opportunities_as_clean_enables",
+      "version": 1,
+      "statement": "Idle behavior must be expressed as stable register enables or shared low-activity guard conditions in functional RTL \u2014 modern power-estimation and auto-gating flows look for exactly those patterns to estimate clock/data-path/glitch power and prove gating safety.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.icg_inserted_count",
+          "mechanism": "Exposing enable structure at RTL makes ICG insertion candidates discoverable by synth, capturing dynamic-power savings instead of leaving them buried.",
+          "estimated_cost_saved_hours": 12
+        },
+        {
+          "downstream_stage": "power",
+          "downstream_key": "power.clock_mw",
+          "mechanism": "Clean enable visibility lets power tools quantify clock-gating savings before late optimization.",
+          "estimated_cost_saved_hours": 8
+        }
+      ],
+      "rationale": "PrimePower RTL explicitly explores clock-gating, memory, datapath, and glitch power from RTL \u2014 enable visibility is part of the analyzable design intent. Antmicro's OpenROAD gating work makes the structural requirement concrete: candidate nets must be related, low-activity, and SAT-checkable as correct gating conditions.",
+      "citations": [
+        {
+          "title": "PrimePower RTL to Signoff Power Analysis",
+          "url": "https://www.synopsys.com/implementation-and-signoff/signoff/primepower.html"
+        },
+        {
+          "title": "Implementing automatic clock gating in OpenROAD",
+          "url": "https://antmicro.com/blog/2025/07/automatic-clock-gating-in-openroad/"
+        },
+        {
+          "title": "Shift-Left Techniques in EDA Survey",
+          "url": "https://arxiv.org/html/2509.14551v1"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_ai_comb_blocks_need_missing_arm_checks",
+      "version": 1,
+      "statement": "For AI-generated or AI-assisted combinational code, missing else/default arms must be assumed common and checked automatically before review proceeds \u2014 current error analyses point to domain-knowledge gaps and rule-specific correction passes are still the most effective fix.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.always_comb_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.latch.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "Targeting the missing-arm failure mode in AI RTL eliminates the dominant 'looks plausible but stores state' bug class before synth sees it.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "The 2025 LLM-RTL error paper says the dominant issue is missing RTL programming knowledge rather than abstract reasoning, which makes omission-style bugs unsurprising. DVCon Taiwan results show AI correction quality varies sharply by violation type, so latch-class checks should stay explicit and local.",
+      "citations": [
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_ai_seq_blocks_get_assignment_type_audit",
+      "version": 1,
+      "statement": "AI-origin sequential logic must receive a dedicated audit for blocking-vs-non-blocking misuse \u2014 assignment-style drift is a known RTL-knowledge failure mode and lint correction accuracy depends on rule-specific targeting.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.always_ff_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.blkseq.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.race_condition_count",
+          "mechanism": "Targeted assignment-discipline audit on AI sequential blocks eliminates scheduler-order bugs and silent simulation-only behavior.",
+          "estimated_cost_saved_hours": 5
+        }
+      ],
+      "rationale": "AI error analyses point to insufficient specialized RTL knowledge as the core bottleneck; assignment semantics are exactly the domain-specific habit that generic code models miss. lowRISC and Verilator make the review target objective by encoding the discipline as lintable rules.",
+      "citations": [
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        },
+        {
+          "title": "lowRISC Verilog Coding Style Guide",
+          "url": "https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_ai_reset_polarity_and_release_are_cross_module_checked",
+      "version": 1,
+      "statement": "AI-origin modules must be checked in groups for reset polarity, naming, assertion style, and deassert synchronization \u2014 generated code often looks locally consistent while disagreeing at the subsystem level.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.reset_domains"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.rdc.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "sim",
+          "downstream_key": "sim.cdc_intermittent_failures",
+          "mechanism": "Cross-module reset audit on AI-authored RTL eliminates polarity mismatches, reset deadlocks, and hidden RDC bugs at source.",
+          "estimated_cost_saved_hours": 24
+        }
+      ],
+      "rationale": "The 2025 error analysis says design-description ambiguity and missing circuit knowledge remain major failure causes \u2014 exactly how reset conventions drift between generated modules. Classic reset guidance plus modern RDC methodology makes this a cross-file semantic lint rule rather than subjective review.",
+      "citations": [
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        },
+        {
+          "title": "Synchronous Resets? Asynchronous Resets? I am so confused...",
+          "url": "https://lcdm-eng.com/papers/snug02_Resets1.pdf"
+        },
+        {
+          "title": "Navigating Reset Domain Crossings to Safety in Complex SoCs",
+          "url": "https://blogs.sw.siemens.com/verificationhorizons/2024/05/21/navigating-reset-domain-crossings-to-safety-in-complex-socs/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_ai_arithmetic_gets_width_and_sign_sanitization",
+      "version": 1,
+      "statement": "AI-origin arithmetic must pass through an explicit width/sign sanitization step that inserts casts, literal sizes, and reviewed truncation points \u2014 under-specified datapaths are a predictable failure class for generators without hardware-native type discipline.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.width.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.width",
+          "mechanism": "Sanitizing AI arithmetic at RTL prevents silent truncation and sign-extension bugs from reaching synth or simulation.",
+          "estimated_cost_saved_hours": 7
+        }
+      ],
+      "rationale": "The LLM-RTL error paper attributes many failures to domain-knowledge gaps rather than generic reasoning limits, and arithmetic sizing is one of the sharpest hardware-specific knowledge tests. Verilator and Verible already encode the static checks; the operational fix is mostly process.",
+      "citations": [
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        },
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "verible-verilog-lint",
+          "url": "https://chipsalliance.github.io/verible/verilog_lint.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_ai_output_must_resolve_to_real_language_and_library_primitives",
+      "version": 1,
+      "statement": "AI-generated RTL must be rejected if it invents primitives, mixes unsupported Verilog-2001 idioms into an SV-only codebase, or emits syntax no agreed toolchain understands \u2014 generation quality improves only when external rule-checking and domain retrieval constrain the model to real constructs.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "ai_generated",
+          "ai_assisted"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.invented_primitive.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "synth.warnings.elab_failure",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.warnings.elab_failure",
+          "mechanism": "Resolving AI output against an approved language/library manifest prevents non-compiling RTL and fabricated dependency chains from reaching synth.",
+          "estimated_cost_saved_hours": 9
+        }
+      ],
+      "rationale": "The 2025 error analysis argues retrieval-augmented domain knowledge and rule checking are effective precisely because the base model does not reliably know the RTL environment. OpenTitan and Yosys give a practical alternative: define a narrow supported language/style subset and lint everything against it.",
+      "citations": [
+        {
+          "title": "Understanding and Mitigating Errors of LLM-Generated RTL Code",
+          "url": "https://arxiv.org/abs/2508.05266"
+        },
+        {
+          "title": "Automatically Fix RTL Lint Violations with GenAI",
+          "url": "https://dvcon-proceedings.org/wp-content/uploads/3.4-yePyp1ZXiOnS-DVCon_Taiwan_2025_paper_2-1.pdf"
+        },
+        {
+          "title": "OpenTitan hardware methodology",
+          "url": "https://opentitan.org/book/doc/contributing/hw/methodology.html"
+        },
+        {
+          "title": "2. Basic principles \u2014 YosysHQ Docs",
+          "url": "https://yosyshq.readthedocs.io/projects/yosys/en/0.39/CHAPTER_Basics.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_async_controls_are_test_controllable",
+      "version": 1,
+      "statement": "Asynchronous set/reset controls used in functional RTL must be designed so they can be overridden during scan shift and re-enabled during capture \u2014 uncontrollable async controls reduce test coverage and corrupt scan behavior.",
+      "kind": "constraint",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.async_controls"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.async_uncontrollable.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "signoff",
+          "downstream_key": "dft.scan_coverage_pct",
+          "mechanism": "Test-controllable async controls preserve ATPG coverage and avoid scan corruption that requires DFT closure iterations.",
+          "estimated_cost_saved_hours": 16
+        }
+      ],
+      "rationale": "Tessent's public guidance is unambiguous: async sets/resets must be defined, checked for controllability, disabled during shift, enabled during capture. Siemens' RDC view adds the modern systems reason: reset behavior is now a dedicated signoff concern.",
+      "citations": [
+        {
+          "title": "DFT architectural tips testing of asynchronous sets resets",
+          "url": "https://blogs.sw.siemens.com/tessent/2019/07/24/dft-architectural-tips-testing-of-asynchronous-sets-resets/"
+        },
+        {
+          "title": "Navigating Reset Domain Crossings to Safety in Complex SoCs",
+          "url": "https://blogs.sw.siemens.com/verificationhorizons/2024/05/21/navigating-reset-domain-crossings-to-safety-in-complex-socs/"
+        },
+        {
+          "title": "Synchronous Resets? Asynchronous Resets? I am so confused...",
+          "url": "https://lcdm-eng.com/papers/snug02_Resets1.pdf"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_dft_clean_rtl_has_no_uncontrolled_loops_or_hidden_async_paths",
+      "version": 1,
+      "statement": "DFT-ready RTL must avoid combinational loops and must make every asynchronous control path obvious, bounded, and reviewable \u2014 loops impede stable scan while hidden async paths create test and functional uncertainty.",
+      "kind": "constraint",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "rtl.lint.unoptflat.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        },
+        {
+          "measurement_key": "rtl.lint.async_uncontrollable.count",
+          "channel": "intervals",
+          "value": {
+            "min": 0,
+            "max": 0
+          },
+          "horizon": "rtl"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "signoff",
+          "downstream_key": "dft.scan_coverage_pct",
+          "mechanism": "Lint-clean loops and explicit async paths prevent ATPG blockage and unstable scan observations.",
+          "estimated_cost_saved_hours": 10
+        }
+      ],
+      "rationale": "Verilator's UNOPTFLAT is not a DFT checker but is a strong early signal that logic is harder to optimize and reason about. Tessent and OpenTitan together make the operational message clear: make async behavior explicit and lint-clean at RTL, not after scan insertion.",
+      "citations": [
+        {
+          "title": "Verilator warnings",
+          "url": "https://verilator.org/guide/latest/warnings.html"
+        },
+        {
+          "title": "DFT architectural tips testing of asynchronous sets resets",
+          "url": "https://blogs.sw.siemens.com/tessent/2019/07/24/dft-architectural-tips-testing-of-asynchronous-sets-resets/"
+        },
+        {
+          "title": "OpenTitan hardware methodology",
+          "url": "https://opentitan.org/book/doc/contributing/hw/methodology.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_enable_inside_alwaysff_is_the_default_gating_surface",
+      "version": 1,
+      "statement": "The preferred RTL surface for clock-gating inference is the ordinary enable-inside-always_ff pattern \u2014 it preserves clean clock semantics while exposing shared conditional update behavior to synthesis and RTL power tools.",
+      "kind": "heuristic",
+      "strength": "high",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.always_ff_blocks"
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.icg_inserted_count",
+          "mechanism": "Enable-in-always_ff makes synth's automatic ICG insertion succeed instead of leaving power intent opaque.",
+          "estimated_cost_saved_hours": 8
+        },
+        {
+          "downstream_stage": "power",
+          "downstream_key": "power.clock_mw",
+          "mechanism": "Visible enable structure lets RTL power tools attribute and reduce clock-tree power.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "PrimePower RTL explicitly explores clock-gating and glitch-power opportunities from RTL, so visible enable structure is part of the analyzable design intent. AMD recommends clock-enable conversion over direct gating; Design-Reuse shows the exact enable-coded pattern used for tool-inferred gating.",
+      "citations": [
+        {
+          "title": "PrimePower RTL to Signoff Power Analysis",
+          "url": "https://www.synopsys.com/implementation-and-signoff/signoff/primepower.html"
+        },
+        {
+          "title": "Converting Clock Gating to Clock Enable - AMD UG949",
+          "url": "https://docs.amd.com/r/en-US/ug949-vivado-design-methodology/Converting-Clock-Gating-to-Clock-Enable"
+        },
+        {
+          "title": "Reducing Power Hot Spots through RTL optimization",
+          "url": "https://www.design-reuse.com/article/61502-reducing-power-hot-spots-through-rtl-optimization-techniques/"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    },
+    {
+      "id": "r_rtl_shared_low_activity_enables_are_better_than_hand_gated_clocks",
+      "version": 1,
+      "statement": "Where power intent is visible at RTL, prefer shared, local, low-activity enable conditions that gate a meaningful group of registers over ad-hoc hand-gated clocks \u2014 modern gating flows look for minimal safe conditions and may skip insertion when too few flops benefit.",
+      "kind": "heuristic",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl",
+          "synth"
+        ],
+        "tools": [
+          "verilator",
+          "slang"
+        ],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "exists",
+          "key": "rtl.clock_gating_candidate_groups"
+        }
+      ],
+      "unless": [],
+      "predicts": [],
+      "prevents": [
+        {
+          "downstream_stage": "synth",
+          "downstream_key": "synth.icg_inserted_count",
+          "mechanism": "Shared low-activity enables let auto-gating clear its register-count threshold and survive synthesis instead of being pruned.",
+          "estimated_cost_saved_hours": 6
+        },
+        {
+          "downstream_stage": "power",
+          "downstream_key": "power.clock_mw",
+          "mechanism": "Group-level enables yield meaningful dynamic-power savings vs fragile single-flop hand-gated clocks.",
+          "estimated_cost_saved_hours": 6
+        }
+      ],
+      "rationale": "Antmicro's OpenROAD gating flow explicitly uses heuristics around related nets, signal activity, and a minimum gated-register threshold before inserting a gate \u2014 a practical codification of 'visible and shareable enable first'. 24x7FPGA explains the electrical downside of naive logic-gated clocks; PrimePower shows why keeping intent in enables wins for early power reasoning.",
+      "citations": [
+        {
+          "title": "Implementing automatic clock gating in OpenROAD",
+          "url": "https://antmicro.com/blog/2025/07/automatic-clock-gating-in-openroad/"
+        },
+        {
+          "title": "Clock Gating - 24x7FPGA",
+          "url": "https://24x7fpga.com/rtl_directory/2024_09_13_12_36_11_clock_gating/"
+        },
+        {
+          "title": "PrimePower RTL to Signoff Power Analysis",
+          "url": "https://www.synopsys.com/implementation-and-signoff/signoff/primepower.html"
+        }
+      ],
+      "authored_by": "seed-pack-rtl",
+      "authored_at": "2026-05-06T00:00:00Z",
+      "history": []
+    }
+  ]
+}

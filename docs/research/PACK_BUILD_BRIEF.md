@@ -59,7 +59,7 @@ For each dossier rule, produce ONE JSON object with these fields:
    - `status`: `"active"`.
 
 2. **applies_to**
-   - `stage`: closed enum `[pre_rtl|rtl|synth|pnr|cts|sta|sim|power|signoff|weather]`. RTL pack rules: `["rtl"]` baseline. If the rule predicts something gradable only at synth (i.e. `predicts[].horizon == "synth"`), list `["rtl","synth"]`.
+   - `stage`: closed enum `[pre_rtl|rtl|synth|pnr|cts|sta|sim|power|signoff]`. RTL pack rules: `["rtl"]` baseline. If the rule predicts something gradable only at synth (i.e. `predicts[].horizon == "synth"`), list `["rtl","synth"]`.
    - `tools`: list — RTL pack: `["verilator","slang"]` for lint-style rules, `["any"]` for tool-agnostic. Synth pack: derive from dossier's `applies_to.tools:` line.
    - `pdks`: derive from dossier; default `[]` (any).
    - `design_class`: derive from dossier; default `["any"]`.

@@ -51,7 +51,7 @@
   "$defs": {
     "stage": {
       "type": "string",
-      "enum": ["pre_rtl", "rtl", "synth", "pnr", "cts", "sta", "sim", "power", "signoff", "weather"]
+      "enum": ["pre_rtl", "rtl", "synth", "pnr", "cts", "sta", "sim", "power", "signoff"]
     },
     "kind": {
       "type": "string",

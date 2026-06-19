@@ -7,7 +7,7 @@ agent (the human + me) fires actual subagents between stages.
 
 Usage:
     # 1. Prepare everything: perceive, recall, write attention briefs
-    python3 run_real.py prepare scenarios/ibex_signoff scenarios/toy_weather
+    python3 run_real.py prepare scenarios/ibex_signoff scenarios/ibex_synth
 
     # 2. After firing all attention subagents and dropping output.json
     #    files in the right places, write predict briefs:
@@ -157,26 +157,6 @@ def cmd_prepare(scenario_dirs: list[str]):
             with open(world_path, "w") as f: json.dump(world.to_dict(), f, indent=2)
             with open(reality_path, "w") as f: json.dump(asdict(reality), f, indent=2, default=str)
             for q in qs:
-                triples.append((q, world, reality, world_path, reality_path))
-        elif name == "toy_weather":
-            sit_dir = cfg["situations_dir"]
-            gt_path = cfg["oracle"]["ground_truth_path"]
-            gt = json.load(open(gt_path))
-            for fname in sorted(os.listdir(sit_dir)):
-                if not fname.endswith(".json"): continue
-                sit_path = os.path.join(sit_dir, fname)
-                sit = json.load(open(sit_path))
-                sid = sit["situation_id"]
-                world = perceiver.perceive([sit_path])
-                stage = gt["situations"][sid].get("stage")
-                qtext = gt["situations"][sid]["question"]
-                reality = oracle.reality_for(sid)
-                world_path = os.path.join(session_dir, f"{name}_{sid}_world.json")
-                reality_path = os.path.join(session_dir, f"{name}_{sid}_reality.json")
-                with open(world_path, "w") as f: json.dump(world.to_dict(), f, indent=2)
-                with open(reality_path, "w") as f: json.dump(asdict(reality), f, indent=2, default=str)
-                q = {"id": sid, "question": qtext, "stage": stage,
-                     "verdict": gt["situations"][sid]["verdict"]}
                 triples.append((q, world, reality, world_path, reality_path))
 
         # Now write attention briefs for each question

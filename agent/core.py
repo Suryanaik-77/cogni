@@ -5,7 +5,7 @@ Domain-agnostic dataclasses that hold the state of cognition.
 
 Design principle: the agent imports from this file. Nothing in this file
 imports from any pack, adapter, or oracle. Cognition does not know whether
-it is reasoning about chips, drugs, code, or weather.
+it is reasoning about chips, netlists, or code.
 """
 from __future__ import annotations
 import json

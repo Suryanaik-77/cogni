@@ -6,7 +6,6 @@ question, observe reality, reflect. Logs everything to runs/<scenario>/<ts>/.
 
 Usage:
     python3 run_scenario.py scenarios/ibex_signoff   [--dispatcher mock|subagent|replay]
-    python3 run_scenario.py scenarios/toy_weather    [--dispatcher mock]
 
 Outputs (under runs/<scenario>/<ts>/):
     ledger.jsonl       — committed predictions
@@ -46,11 +45,9 @@ from agent import verdict as verdict_engine
 # so old scenario configs keep working during the refactor.
 _LEGACY_ADAPTER_TO_PAIR = {
     "rtl_ibex":    ("synth", "yosys"),   # Ibex flow went through Yosys
-    "weather_obs": ("weather", "json"),
 }
 _LEGACY_ORACLE_TO_PAIR = {
     "yosys": ("synth", "yosys"),
-    "json":  ("weather", "json"),
 }
 
 
@@ -274,27 +271,6 @@ def run(scenario_dir: str, dispatcher_kind: str = "mock",
         with open(os.path.join(run_dir, "reality.json"), "w") as f:
             json.dump(asdict(reality), f, indent=2, default=str)
         question_set = [(q, world, reality) for q in questions]
-    elif name == "toy_weather":
-        question_set = []
-        sit_dir = cfg["situations_dir"]
-        gt = json.load(open(cfg["oracle"]["ground_truth_path"]))
-        for fname in sorted(os.listdir(sit_dir)):
-            if not fname.endswith(".json"):
-                continue
-            sit_path = os.path.join(sit_dir, fname)
-            sit = json.load(open(sit_path))
-            sid = sit["situation_id"]
-            world = perceiver.perceive([sit_path])
-            stage = gt["situations"][sid].get("stage")
-            qtext = gt["situations"][sid]["question"]
-            reality = oracle.reality_for(sid)
-            q = {
-                "id": sid,
-                "question": qtext,
-                "stage": stage,
-                "verdict": gt["situations"][sid]["verdict"],
-            }
-            question_set.append((q, world, reality))
     else:
         raise ValueError(f"don't know how to drive scenario '{name}'")
 

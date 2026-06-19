@@ -6,10 +6,10 @@ Adapter pairs for the cognitive agent.
 
 A *pair* is (Perceiver, Oracle):
 - Perceiver: reads raw stage inputs (RTL files, synth JSON, lint reports,
-  weather observations, ...) and emits WorldModel facts.
+  ...) and emits WorldModel facts.
 - Oracle:    runs the deterministic ground-truth tool for that stage and
   returns a Reality keyed under a stage-prefixed namespace
-  (`rtl.*`, `synth.*`, `pnr.*`, `weather.*`, ...).
+  (`rtl.*`, `synth.*`, `pnr.*`, ...).
 
 Pairs are keyed by (stage, tool). Stage describes WHERE in the EDA flow
 the prediction lives; tool describes WHICH implementation produces

@@ -17,13 +17,13 @@ Why a separate harness instead of an inline `--n-runs` flag?
 
 Usage:
     PYTHONPATH=. python3 run_ensemble.py \\
-        scenarios/toy_weather \\
+        scenarios/rtl_demo \\
         --n-runs 3 \\
         --test-mode \\
         --concurrency 10
 
     # A-B testing: tag each ensemble with a label, then diff metrics.
-    PYTHONPATH=. python3 run_ensemble.py scenarios/toy_weather \\
+    PYTHONPATH=. python3 run_ensemble.py scenarios/rtl_demo \\
         --n-runs 5 --tag baseline --test-mode
 
 Output layout:
@@ -250,7 +250,7 @@ def main() -> int:
         epilog=__doc__,
     )
     ap.add_argument("scenarios", nargs="+",
-                    help="One or more scenario dirs (e.g. scenarios/toy_weather)")
+                    help="One or more scenario dirs (e.g. scenarios/rtl_demo)")
     ap.add_argument("--n-runs", type=int, default=3,
                     help="Number of independent runs (default 3)")
     ap.add_argument("--seed-base", type=int, default=42,

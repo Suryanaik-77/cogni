@@ -154,7 +154,7 @@ auto-upgraded in memory but not written back unless you call `kb.save()`.
 For the canonical rule shape, see `docs/KB_RULE_FORMAT.md`. Closed enums:
 - `kind`         : `constraint | tendency | heuristic | identity`
 - `strength`     : `high | medium | low`
-- `stage`        : `pre_rtl | rtl | synth | pnr | cts | sta | sim | power | signoff | weather`
+- `stage`        : `pre_rtl | rtl | synth | pnr | cts | sta | sim | power | signoff`
 - `code_origin`  : `any | human | ai_generated | ai_assisted | legacy_imported`
 - `predicate.kind`: `eq | neq | lt | lte | gt | gte | in | not_in | has_tag | missing_tag | between`
 

@@ -546,8 +546,7 @@ just where it landed.
    `structured_claim` keyed by the listed `measurement_key`s.
 5. Update reflect organ to write `history` events instead of
    rewriting `performance` in place.
-6. Migrate `packs/vlsi/rules.json` and `packs/weather/rules.json` to
-   v1 by hand (13 + 6 rules).
+6. Migrate `packs/vlsi/rules.json` to v1 by hand (13 rules).
 7. Tests:
    - one per predicate `op`
    - one per `kind` (constraint vs tendency grading)

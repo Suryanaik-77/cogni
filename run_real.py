@@ -143,16 +143,29 @@ def cmd_prepare(scenario_dirs: list[str]):
         # Covers ibex_signoff (legacy), ibex_synth (v1 synth pack on Ibex),
         # rtl_demo (v1 RTL pack on cmd_alu.sv), and any future scenario that
         # ships a questions.json + a perceiver/oracle pair.
-        if name in ("ibex_signoff", "ibex_synth", "rtl_demo"):
-            qs_path = os.path.join(scen_dir, "questions.json")
-            qs = json.load(open(qs_path))["questions"]
-            # Perceiver input: legacy ibex_signoff used a list of paths;
-            # rtl_demo / ibex_synth use a manifest_path baked into config
-            # (no perceive() args required). Pass `rtl_root` if present
-            # for backward compatibility, else an empty list.
+        if name in ("ibex_signoff", "ibex_synth", "rtl_demo", "fifo_demo"):
+            # Build the world first (live Verilator facts), so questions can be
+            # auto-generated from it when no questions.json is provided.
             perceive_input = [cfg["rtl_root"]] if cfg.get("rtl_root") else []
             world = perceiver.perceive(perceive_input)
             reality = oracle.from_existing()
+
+            # Questions: hand-written questions.json wins; otherwise (or when
+            # config sets generate_questions: true) auto-generate them from the
+            # world facts + rule pack. Same dict shape either way.
+            qs_path = os.path.join(scen_dir, "questions.json")
+            force_gen = str(cfg.get("generate_questions", "")).lower() in ("true", "1", "yes")
+            if os.path.exists(qs_path) and not force_gen:
+                with open(qs_path, encoding="utf-8") as f:
+                    qs = json.load(f)["questions"]
+            else:
+                from agent.question_gen import generate_questions
+                with open(cfg["pack_path"], encoding="utf-8") as f:
+                    _pack = json.load(f)
+                qs = generate_questions(world, _pack, stage=cfg.get("stage", "rtl"))
+                print(f"[prepare] {name}: auto-generated {len(qs)} questions "
+                      f"(no questions.json or generate_questions=true)")
+
             world_path = os.path.join(session_dir, f"{name}_world.json")
             reality_path = os.path.join(session_dir, f"{name}_reality.json")
             with open(world_path, "w") as f: json.dump(world.to_dict(), f, indent=2)
@@ -455,6 +468,16 @@ def cmd_finalize(session_dir: str):
             row = {"id": qid, "question": qrec["question"]}
             if qrec.get("outcome", "").startswith("refused"):
                 row["outcome"] = qrec["outcome"]
+                # Surface WHY it refused (from the predictor's output, or the
+                # earlier no-candidates/no-focus reason stored on the qrec).
+                po = qrec.get("predictor_output") or {}
+                row["reason"] = (po.get("refusal_reason")
+                                 or qrec.get("refusal_reason")
+                                 or "no applicable rule / insufficient evidence")
+                if po.get("missing_evidence"):
+                    row["missing_evidence"] = po["missing_evidence"]
+                if po.get("rules_considered_but_rejected"):
+                    row["rules_rejected"] = po["rules_considered_but_rejected"]
                 summary["totals"]["n_refused"] += 1
                 scen_summary["n_refused"] += 1
                 scen_summary["questions"].append(row)
@@ -466,6 +489,8 @@ def cmd_finalize(session_dir: str):
 
             v = qrec.get("verdict", {})
             row["claim"] = qrec["prediction"]["claim"]
+            # The predictor's reasoning behind the claim (why it predicted this).
+            row["reason"] = qrec["prediction"].get("rationale", "")
             row["confidence"] = qrec["prediction"]["confidence"]
             row["cited_rules"] = qrec["prediction"]["cited_rule_ids"]
             row["verdict"] = v.get("kind")
@@ -633,7 +658,79 @@ async def _exec_stage(session_dir: str, stage: str, concurrency: int) -> dict:
             "cached": n_cached, "wall_s": wall}
 
 
-def cmd_run_all_api(args: list[str], concurrency: int = 8) -> None:
+def cmd_fix_phase(session_dir: str, concurrency: int = 4) -> None:
+    """PHASE 3 (opt-in via --with-fixes): close the fix loop with reality.
+
+    Using the rulebook AS UPDATED by the learn phase, detect where the design
+    violates rules, propose a patch per violation, apply the patches to a
+    COPY of the source, and re-run Verilator to confirm. The real source
+    files are never touched — the operator applies the confirmed patches.
+    """
+    from agent.sweep import sweep
+    from agent.fixer import propose_fixes_sync
+    from agent.fix_verify import verify_fixes, format_report
+
+    state = _load_state(session_dir, "session")
+    print()
+    print("=" * 70)
+    print("[with-fixes] PHASE 3 - detect violations -> propose -> apply-to-copy -> re-check")
+    print("=" * 70)
+
+    for scen_name, scen in state["scenarios"].items():
+        cfg = scen.get("config") or read_config(
+            os.path.join(scen["scenario_dir"], "config.yaml"))
+        stage = cfg.get("stage", "rtl")
+        if stage != "rtl":
+            print(f"[with-fixes] {scen_name}: stage={stage} unsupported; skipping.")
+            continue
+
+        # Rebuild world (LIVE Verilator facts) + reality (answer key), exactly
+        # as prepare did. Using the live world means human/AI code-origin facts
+        # are present, so origin-gated rules fire correctly.
+        adapter = make_adapter(cfg)
+        perceiver = Perceiver(adapter)
+        oracle = make_oracle(cfg)
+        perceive_input = [cfg["rtl_root"]] if cfg.get("rtl_root") else []
+        world = perceiver.perceive(perceive_input)
+        reality = oracle.from_existing()
+
+        # Load the UPDATED rulebook (post-learn) for the sweep.
+        kb_after = os.path.join(session_dir, f"{scen_name}_kb_after.json")
+        pack_path = kb_after if os.path.exists(kb_after) else cfg["pack_path"]
+        with open(pack_path, encoding="utf-8") as f:
+            pack = json.load(f)
+        pack["__path__"] = pack_path
+
+        rep = sweep(pack, world, reality, stage_filter=stage)
+        violations = rep.violations()
+        print(f"[with-fixes] {scen_name}: {len(violations)} violation(s) detected")
+        if not violations:
+            continue
+
+        rtl_root = (cfg.get("oracle") or {}).get("rtl_root") \
+            or os.path.join(scen["scenario_dir"], "rtl")
+        if not (rtl_root and os.path.isdir(rtl_root)):
+            print(f"[with-fixes] {scen_name}: no rtl_root; cannot fix.")
+            continue
+
+        fix_dir = os.path.join(session_dir, f"{scen_name}_fixes")
+        fixes = propose_fixes_sync(violations, fix_dir, rtl_root=rtl_root,
+                                   concurrency=concurrency)
+        patches = [{"target_file": f.target_file,
+                    "patch_unified_diff": f.patch_unified_diff,
+                    "rule_id": f.rule_id}
+                   for f in fixes if f.patch_unified_diff]
+        print(f"[with-fixes] {scen_name}: {len(patches)} patch(es) proposed")
+        if not patches:
+            continue
+
+        top = (cfg.get("perceiver") or {}).get("top")
+        res = verify_fixes(patches, rtl_root, top=top)
+        print(format_report(res))
+
+
+def cmd_run_all_api(args: list[str], concurrency: int = 8,
+                    with_fixes: bool = False) -> None:
     """End-to-end async runner. Either resume an existing session_dir, or
     start fresh from one or more scenario dirs.
 
@@ -721,6 +818,10 @@ def cmd_run_all_api(args: list[str], concurrency: int = 8) -> None:
         if mx.get("errors"):
             print(f"  silent_failures : {len(mx['errors'])} (see metrics.json[errors])")
 
+    # PHASE 3 (opt-in): detect violations -> propose -> apply-to-copy -> re-check.
+    if with_fixes:
+        cmd_fix_phase(session_dir, concurrency=max(2, concurrency // 2))
+
 
 if __name__ == "__main__":
     # RTL/question text contains UTF-8 (em-dashes etc.). Some shells expose a
@@ -741,6 +842,10 @@ if __name__ == "__main__":
     ap.add_argument("--test-mode", action="store_true",
                     help="Use cheap/fast models (Sonnet + gpt-5-mini) for iteration. "
                          "Equivalent to COGNI_TEST_MODE=1.")
+    ap.add_argument("--with-fixes", action="store_true",
+                    help="After predict+learn, run PHASE 3: detect violations, "
+                         "propose patches, apply to a COPY, and re-run Verilator "
+                         "to confirm. Only the run-all-api command. rtl stage only.")
     ns = ap.parse_args()
     if ns.test_mode and not is_test_mode():
         enable_test_mode()
@@ -788,4 +893,4 @@ if __name__ == "__main__":
         # ns.args[0] is either:
         #   - existing session_dir (resume)
         #   - one or more scenario dirs (fresh start)
-        cmd_run_all_api(ns.args, concurrency=ns.concurrency)
+        cmd_run_all_api(ns.args, concurrency=ns.concurrency, with_fixes=ns.with_fixes)

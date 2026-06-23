@@ -50,7 +50,7 @@ def write_json_report(report_dir: str,
     }
     os.makedirs(report_dir, exist_ok=True)
     path = os.path.join(report_dir, "REPORT.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, default=str)
     return path
 
@@ -65,7 +65,7 @@ def write_patches(report_dir: str, fixes: list[FixProposal]) -> list[str]:
             continue
         fname_part = _safe_filename(f.target_file or "patch")
         path = os.path.join(pdir, f"{_safe_filename(f.rule_id)}__{fname_part}.patch")
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(f.patch_unified_diff.rstrip() + "\n")
         written.append(path)
     return written
@@ -198,7 +198,7 @@ def write_markdown_report(report_dir: str,
 
     os.makedirs(report_dir, exist_ok=True)
     path = os.path.join(report_dir, "REPORT.md")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     return path
 

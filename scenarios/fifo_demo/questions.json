@@ -1,0 +1,34 @@
+{
+  "questions": [
+    {
+      "id": "qf_width",
+      "stage": "rtl",
+      "question": "How many width-mismatch (WIDTH) lint warnings will Verilator emit for sync_fifo.sv, a synchronous FIFO whose status logic compares the occupancy counter against the DEPTH parameter and the constant 0?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.width.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "qf_latch",
+      "stage": "rtl",
+      "question": "How many distinct latches will Verilator infer in sync_fifo.sv, a fully synchronous FIFO built from two always_ff blocks (write and read pointers) with all outputs driven by continuous assigns and no always_comb blocks?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.latch.count",
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "qf_blkseq",
+      "stage": "rtl",
+      "question": "How many blocking-assignment-inside-always_ff hazards will Verilator flag in sync_fifo.sv?",
+      "verdict": {
+        "type": "numeric",
+        "measurement_key": "rtl.lint.blkseq.count",
+        "tolerance": 0
+      }
+    }
+  ]
+}

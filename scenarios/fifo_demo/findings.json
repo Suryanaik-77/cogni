@@ -1,0 +1,30 @@
+{
+  "rtl.lint.latch.count": 0,
+  "rtl.lint.latch.locations": [],
+  "rtl.lint.case_incomplete.count": 0,
+  "rtl.lint.case_incomplete.locations": [],
+  "rtl.lint.fsm_no_default.count": 0,
+  "rtl.lint.blkseq.count": 0,
+  "rtl.lint.blkseq.locations": [],
+  "rtl.lint.width.count": 1,
+  "rtl.lint.width.locations": [
+    {"file": "rtl/sync_fifo.sv", "line": 57, "expr": "count == DEPTH", "lhs_width": 5, "rhs_width": 32, "cause": "5-bit count compared against 32-bit int parameter DEPTH (Operator EQ expects 32 bits, count generates 5)"}
+  ],
+  "rtl.lint.cdc_unsync.count": 0,
+  "rtl.lint.cdc_multibit.count": 0,
+  "rtl.lint.async_uncontrollable.count": 0,
+  "rtl.lint.gated_clock.count": 0,
+  "rtl.lint.implicit_net.count": 0,
+  "rtl.lint.multidriven.count": 0,
+  "rtl.lint.unoptflat.count": 0,
+  "rtl.lint.full_case_pragma.count": 0,
+  "rtl.lint.invented_primitive.count": 0,
+  "rtl.lint.defparam_or_define_config.count": 0,
+  "rtl.lint.hierref.count": 0,
+  "rtl.lint.nonsynth.count": 0,
+  "rtl.lint.unreachable_state.count": 0,
+  "rtl.lint.rdc.count": 0,
+  "synth.warnings.elab_failure": 0,
+  "synth.warnings.latch": 0,
+  "synth.warnings.width": 1
+}

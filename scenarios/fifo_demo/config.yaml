@@ -1,0 +1,38 @@
+name: fifo_demo
+domain: vlsi
+description: |
+  RTL-stage prediction over a clean-LOOKING synchronous FIFO (sync_fifo.sv).
+  Unlike cmd_alu (full of obvious hazards), this FIFO is well-written EXCEPT
+  one subtle bug: `count == DEPTH` compares a 5-bit occupancy counter against
+  a 32-bit int parameter -> exactly 1 Verilator WIDTH warning. Latches and
+  blocking-in-always_ff are both 0.
+
+  Purpose: surprise a rulebook tuned on cmd_alu's obvious arithmetic-width
+  hazard. The width question can trip an under-prediction (design looks clean);
+  the latch/blkseq questions test whether the hazard-primed rules over-fire on
+  a genuinely clean design.
+
+stage: rtl
+tool:  verilator
+
+# Auto-generate questions from the live facts + rule pack (no hand-written
+# questions.json needed). The generator tailors questions to the design —
+# e.g. a FIFO with no always_comb gets no latch question.
+generate_questions: true
+
+pack_path: packs/rtl/rules.json
+
+# Perceiver: LIVE Verilator parse of the FIFO.
+perceiver:
+  top: sync_fifo
+  rtl_files: scenarios/fifo_demo/rtl/sync_fifo.sv
+  code_origin: human
+  author_intent: "Synchronous FIFO; clean design except one subtle width mismatch on the full-flag compare"
+
+# Oracle: replay the real Verilator findings (1 WIDTH, rest 0).
+oracle:
+  top: sync_fifo
+  rtl_root: scenarios/fifo_demo/rtl
+  findings_path: scenarios/fifo_demo/findings.json
+
+confidence_floor: uncertain

@@ -260,6 +260,14 @@ def _resolve_pack(stage: str, override: str | None) -> str:
 
 
 def main():
+    # Force UTF-8 output so a stray non-ASCII char (em-dash etc.) never
+    # crashes printing on a latin-1 locale.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("scenario_dir", nargs="?", default=None,
@@ -282,6 +290,10 @@ def main():
                          "or ./report-<ts>).")
     ap.add_argument("--propose-fixes", action="store_true",
                     help="Run cognitive fix proposer over violations.")
+    ap.add_argument("--verify-fixes", action="store_true",
+                    help="After proposing, duplicate the source, apply the "
+                         "patches, and re-run Verilator to confirm the fix "
+                         "(rtl stage). Implies --propose-fixes.")
     ap.add_argument("--concurrency", type=int, default=4,
                     help="Max parallel LLM calls (default 4).")
     ap.add_argument("--test-mode", action="store_true",
@@ -338,7 +350,7 @@ def main():
 
     # ---- Fixes ----
     fixes = []
-    if args.propose_fixes:
+    if args.propose_fixes or args.verify_fixes:
         violations = rep.violations()
         if not violations:
             print("[cogni-check] no violations; skipping fix proposer.")
@@ -357,6 +369,25 @@ def main():
             ))
             print(f"[cogni-check] fix proposer done in {time.time()-t0:.1f}s "
                   f"({sum(1 for f in fixes if f.patch_unified_diff)} patches)")
+
+    # ---- Verify fixes against reality (duplicate -> apply -> re-lint) ----
+    if args.verify_fixes and fixes:
+        if args.stage != "rtl":
+            print("[cogni-check] --verify-fixes only supported for --stage rtl; skipping.")
+        elif not src_meta.get("rtl_root"):
+            print("[cogni-check] --verify-fixes needs an rtl_root; skipping.")
+        else:
+            from agent.fix_verify import verify_fixes, format_report
+            patches = [{"target_file": f.target_file,
+                        "patch_unified_diff": f.patch_unified_diff,
+                        "rule_id": f.rule_id}
+                       for f in fixes if f.patch_unified_diff]
+            if patches:
+                res = verify_fixes(patches, src_meta["rtl_root"],
+                                   top=args.top_module)
+                print(format_report(res))
+            else:
+                print("[cogni-check] no patches to verify.")
 
     # ---- Write reports ----
     meta = {

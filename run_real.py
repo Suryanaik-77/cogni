@@ -723,6 +723,15 @@ def cmd_run_all_api(args: list[str], concurrency: int = 8) -> None:
 
 
 if __name__ == "__main__":
+    # RTL/question text contains UTF-8 (em-dashes etc.). Some shells expose a
+    # latin-1 stdout, which makes print() crash on those chars. Force UTF-8 so
+    # output never dies on a stray character regardless of locale.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "predict", "verify", "verify-api",
                                       "reflect", "finalize", "run-all-api"])
@@ -747,7 +756,7 @@ if __name__ == "__main__":
             _BEDROCK_PREDICT_MODEL, _BEDROCK_VERIFY1_MODEL, _BEDROCK_VERIFY2_MODEL,
         )
         print("=" * 70)
-        print("  COGNI_BEDROCK active  \u2014  all roles on AWS Bedrock "
+        print("  COGNI_BEDROCK active  --  all roles on AWS Bedrock "
               f"(region={os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION') or 'us-east-1'}):")
         print(f"     predictor/reflector : {_BEDROCK_PREDICT_MODEL}")
         print(f"     verifier 1          : {_BEDROCK_VERIFY1_MODEL}")
@@ -758,9 +767,9 @@ if __name__ == "__main__":
     elif is_test_mode():
         # Banner so the run is unmistakable in logs.
         print("=" * 70)
-        print("  COGNI_TEST_MODE active  \u2014  models swapped:")
-        print("     attention/predict/reflect : claude_opus_4_7  \u2192  claude_sonnet_4_6")
-        print("     verifier (gpt)            : gpt-5            \u2192  gpt-5-mini")
+        print("  COGNI_TEST_MODE active  --  models swapped:")
+        print("     attention/predict/reflect : claude_opus_4_7  ->  claude_sonnet_4_6")
+        print("     verifier (gpt)            : gpt-5            ->  gpt-5-mini")
         print("  Production runs require unsetting both the env var and --test-mode.")
         print("=" * 70)
     if ns.cmd == "prepare":

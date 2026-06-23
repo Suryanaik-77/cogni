@@ -47,7 +47,8 @@ _PRICING: dict[str, tuple[float, float]] = {
 _BEDROCK_PRICING: list[tuple[str, tuple[float, float]]] = [
     ("claude-opus",   (15.0, 75.0)),
     ("claude-sonnet", (3.0,  15.0)),
-    ("claude-haiku",  (0.80, 4.0)),
+    ("haiku",         (1.0,  5.0)),
+    ("llama3-1-8b",   (0.22, 0.22)),
     ("llama",         (0.72, 0.72)),
     ("mistral-large", (2.0,  6.0)),
     ("nova-pro",      (0.80, 3.20)),

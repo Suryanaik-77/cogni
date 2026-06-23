@@ -132,11 +132,13 @@ class LLMCall:
         inputs_path = os.path.join(call_dir, "inputs.json")
         output_path = self.output_path or os.path.join(call_dir, "output.json")
 
-        with open(prompt_path, "w") as f:
+        # Always UTF-8: prompts/inputs carry em-dashes and other non-ASCII
+        # from RTL/question text; the OS default encoding may be latin-1.
+        with open(prompt_path, "w", encoding="utf-8") as f:
             f.write(self.prompt)
-        with open(schema_path, "w") as f:
+        with open(schema_path, "w", encoding="utf-8") as f:
             json.dump(self.schema, f, indent=2)
-        with open(inputs_path, "w") as f:
+        with open(inputs_path, "w", encoding="utf-8") as f:
             json.dump(self.inputs, f, indent=2, default=str)
 
         self.output_path = output_path
@@ -188,7 +190,7 @@ against the schema and use it directly for downstream reasoning.
         """Load and validate the subagent's JSON response."""
         if not os.path.exists(self.output_path):
             raise FileNotFoundError(f"LLM output not yet written: {self.output_path}")
-        with open(self.output_path) as f:
+        with open(self.output_path, encoding="utf-8") as f:
             data = json.load(f)
         validate_schema(data, self.schema)
         return data

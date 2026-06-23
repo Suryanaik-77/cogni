@@ -19,17 +19,22 @@ stage: rtl
 tool:  verilator
 
 # Knowledge pack
-pack_path: /home/user/workspace/cogni/packs/rtl/rules.json
+pack_path: packs/rtl/rules.json
 
-# Perceiver: load facts from manifest (live Verilator parser is skeleton).
+# Perceiver: LIVE Verilator parse of the RTL (auto-extracts facts from the
+# .sv via `verilator --xml-only`). code_origin/author_intent are human
+# context the AST can't supply. (Set manifest_path instead to use the old
+# pre-computed facts offline.)
 perceiver:
   top: cmd_alu
-  manifest_path: /home/user/workspace/cogni/scenarios/rtl_demo/manifest.json
+  rtl_files: scenarios/rtl_demo/rtl/cmd_alu.sv
+  code_origin: human
+  author_intent: "FSM+ALU demo with deliberate lint hazards for testing"
 
 # Oracle: replay findings JSON (no Verilator binary in sandbox).
 oracle:
   top: cmd_alu
-  rtl_root: /home/user/workspace/cogni/scenarios/rtl_demo/rtl
-  findings_path: /home/user/workspace/cogni/scenarios/rtl_demo/findings.json
+  rtl_root: scenarios/rtl_demo/rtl
+  findings_path: scenarios/rtl_demo/findings.json
 
 confidence_floor: uncertain

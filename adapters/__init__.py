@@ -57,6 +57,9 @@ def _verilator_perceiver(cfg: dict[str, Any]):
         include_dirs=cfg.get("include_dirs"),
         defines=cfg.get("defines"),
         manifest_path=cfg.get("manifest_path"),
+        rtl_files=cfg.get("rtl_files"),
+        code_origin=cfg.get("code_origin", "unknown"),
+        author_intent=cfg.get("author_intent"),
     )
 
 

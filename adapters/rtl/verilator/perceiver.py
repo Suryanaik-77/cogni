@@ -44,24 +44,28 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import tempfile
 
 from agent.core import WorldModel
+from adapters.rtl.verilator.xml_facts import facts_from_xml
 
 
 class VerilatorRTLPerceiver:
     """RTL-stage perceiver.
 
-    Two modes today:
+    Two modes:
 
-    - `manifest_path` (when supplied): load a precomputed JSON
-      describing the RTL (modules, FSMs, clock/reset, code_origin) and
-      emit facts/tags directly. This is what scenarios/rtl_demo uses
-      while a live Verilator parser isn't wired in.
-    - `perceive`: live parsing path, still a skeleton — raises if no
-      manifest_path is set.
+    - LIVE (default): run Verilator ``--xml-only`` over the RTL source,
+      parse the AST, and emit facts. Triggered when source files are given
+      (via `rtl_files` or the `raw_input` path) and no manifest is set.
+    - `manifest_path` (legacy/fixture): load a precomputed JSON describing
+      the RTL and emit facts directly — used for offline tests or when
+      Verilator isn't installed.
 
-    Both shapes write into the same `rtl.*` / `core.*` namespace so the
-    rule engine doesn't care which mode produced the facts.
+    Both modes write into the same `rtl.*` / `core.*` namespace so the rule
+    engine doesn't care which produced the facts. The live parser reads
+    only *structure* — lint warnings stay with the oracle (the answer key).
     """
 
     domain = "vlsi"
@@ -71,21 +75,99 @@ class VerilatorRTLPerceiver:
     def __init__(self, *, top: str | None = None,
                  include_dirs: list[str] | None = None,
                  defines: dict[str, str] | None = None,
-                 manifest_path: str | None = None):
+                 manifest_path: str | None = None,
+                 rtl_files: list[str] | None = None,
+                 code_origin: str = "unknown",
+                 author_intent: str | None = None,
+                 verilator_bin: str = "verilator"):
         self.top = top
         self.include_dirs = include_dirs or []
         self.defines = defines or {}
         self.manifest_path = manifest_path
+        # Accept a list, a single path, or a comma-separated string (the
+        # flat-YAML config form). Anything falsy -> empty.
+        if isinstance(rtl_files, str):
+            rtl_files = [p.strip() for p in rtl_files.split(",") if p.strip()]
+        self.rtl_files = list(rtl_files) if rtl_files else []
+        self.code_origin = code_origin
+        self.author_intent = author_intent
+        self.verilator_bin = verilator_bin
 
     def perceive(self, world: WorldModel, raw_input: str) -> None:
         if self.manifest_path:
             self._perceive_from_manifest(world)
             return
-        raise NotImplementedError(
-            "VerilatorRTLPerceiver has no manifest_path and live parsing "
-            "is not wired yet. Provide a manifest JSON or implement "
-            "--xml-only parsing here. See module docstring."
+        files = list(self.rtl_files)
+        if raw_input:
+            files.append(raw_input)
+        if not files:
+            raise ValueError(
+                "VerilatorRTLPerceiver: no RTL source given. Pass rtl_files= "
+                "or a source path as raw_input (or set manifest_path for the "
+                "fixture path)."
+            )
+        self._perceive_from_verilator(world, files)
+
+    # ------------------------------------------------------------------
+    # Live Verilator path
+    # ------------------------------------------------------------------
+
+    def _run_verilator_xml(self, files: list[str]) -> str:
+        """Invoke `verilator --xml-only` and return the AST XML text.
+
+        `-Wno-lint` keeps lint warnings out of the way: the perceiver wants
+        structure only; lint findings belong to the oracle.
+        """
+        out_dir = tempfile.mkdtemp(prefix="cogni_vxml_")
+        out_xml = os.path.join(out_dir, "ast.xml")
+        cmd = [self.verilator_bin, "--xml-only", "-Wno-lint",
+               "--xml-output", out_xml]
+        for inc in self.include_dirs:
+            cmd.append("-I" + inc)
+        for k, v in self.defines.items():
+            cmd.append(f"+define+{k}={v}" if v else f"+define+{k}")
+        if self.top:
+            cmd += ["--top-module", self.top]
+        cmd += files
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"verilator not found ({self.verilator_bin!r}). Install it "
+                f"(e.g. `dnf install verilator`) or use manifest_path."
+            ) from e
+        if not os.path.exists(out_xml):
+            raise RuntimeError(
+                "verilator --xml-only produced no XML.\n"
+                f"command: {' '.join(cmd)}\nstderr:\n{proc.stderr}"
+            )
+        with open(out_xml) as f:
+            return f.read()
+
+    def _perceive_from_verilator(self, world: WorldModel, files: list[str]) -> None:
+        xml_text = self._run_verilator_xml(files)
+        loc = 0
+        for f in files:
+            try:
+                with open(f) as fh:
+                    loc += sum(1 for _ in fh)
+            except OSError:
+                pass
+        source = files[0] if len(files) == 1 else f"{files[0]} (+{len(files) - 1} more)"
+        facts, tags = facts_from_xml(
+            xml_text,
+            source=source,
+            lines_of_code=loc or None,
+            code_origin=self.code_origin,
+            author_intent=self.author_intent,
         )
+        primary_key = "rtl.module.top"
+        for k, v in facts.items():
+            world.add(k, v, source=source,
+                      tags=tags if k == primary_key else [])
+        for t in tags:
+            world.tags.add(t)
+        world.tags.add("rtl_stage")
 
     def _perceive_from_manifest(self, world: WorldModel) -> None:
         if not os.path.exists(self.manifest_path):

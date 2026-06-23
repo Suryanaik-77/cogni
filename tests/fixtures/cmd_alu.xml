@@ -1,0 +1,285 @@
+<?xml version="1.0" ?>
+<!-- DESCRIPTION: Verilator output: XML representation of netlist -->
+<verilator_xml>
+  <files>
+    <file id="a" filename="&lt;built-in&gt;" language="1800-2017"/>
+    <file id="b" filename="&lt;command-line&gt;" language="1800-2017"/>
+    <file id="c" filename="scenarios/rtl_demo/rtl/cmd_alu.sv" language="1800-2017"/>
+  </files>
+  <module_files>
+    <file id="c" filename="scenarios/rtl_demo/rtl/cmd_alu.sv" language="1800-2017"/>
+  </module_files>
+  <cells>
+    <cell fl="c19" loc="c,19,8,19,15" name="cmd_alu" submodname="cmd_alu" hier="cmd_alu"/>
+  </cells>
+  <netlist>
+    <module fl="c19" loc="c,19,8,19,15" name="cmd_alu" origName="cmd_alu">
+      <var fl="c20" loc="c,20,26,20,31" name="WIDTH" dtype_id="1" vartype="int" origName="WIDTH" param="true">
+        <const fl="c20" loc="c,20,34,20,36" name="32&apos;sh20" dtype_id="2"/>
+      </var>
+      <var fl="c22" loc="c,22,34,22,39" name="clk_i" dtype_id="3" dir="input" vartype="logic" origName="clk_i"/>
+      <var fl="c23" loc="c,23,34,23,40" name="rst_ni" dtype_id="3" dir="input" vartype="logic" origName="rst_ni"/>
+      <var fl="c25" loc="c,25,34,25,41" name="start_i" dtype_id="3" dir="input" vartype="logic" origName="start_i"/>
+      <var fl="c26" loc="c,26,34,26,42" name="opcode_i" dtype_id="4" dir="input" vartype="logic" origName="opcode_i"/>
+      <var fl="c27" loc="c,27,34,27,37" name="a_i" dtype_id="5" dir="input" vartype="logic" origName="a_i"/>
+      <var fl="c28" loc="c,28,34,28,37" name="b_i" dtype_id="5" dir="input" vartype="logic" origName="b_i"/>
+      <var fl="c29" loc="c,29,34,29,37" name="k_i" dtype_id="6" dir="input" vartype="logic" origName="k_i"/>
+      <var fl="c31" loc="c,31,34,31,40" name="busy_o" dtype_id="3" dir="output" vartype="logic" origName="busy_o"/>
+      <var fl="c32" loc="c,32,34,32,40" name="done_o" dtype_id="3" dir="output" vartype="logic" origName="done_o"/>
+      <var fl="c33" loc="c,33,34,33,42" name="result_o" dtype_id="5" dir="output" vartype="logic" origName="result_o"/>
+      <var fl="c34" loc="c,34,34,34,40" name="flag_o" dtype_id="3" dir="output" vartype="logic" origName="flag_o"/>
+      <typedef fl="c45" loc="c,45,5,45,12" name="state_e" dtype_id="7"/>
+      <var fl="c47" loc="c,47,11,47,18" name="state_q" dtype_id="7" vartype="state_e" origName="state_q"/>
+      <var fl="c47" loc="c,47,20,47,27" name="state_d" dtype_id="7" vartype="state_e" origName="state_d"/>
+      <var fl="c52" loc="c,52,21,52,27" name="op_a_q" dtype_id="5" vartype="logic" origName="op_a_q"/>
+      <var fl="c52" loc="c,52,29,52,35" name="op_b_q" dtype_id="5" vartype="logic" origName="op_b_q"/>
+      <var fl="c53" loc="c,53,21,53,26" name="opc_q" dtype_id="4" vartype="logic" origName="opc_q"/>
+      <var fl="c54" loc="c,54,21,54,26" name="acc_q" dtype_id="5" vartype="logic" origName="acc_q"/>
+      <always fl="c59" loc="c,59,3,59,14">
+        <begin fl="c59" loc="c,59,15,59,20">
+          <assign fl="c60" loc="c,60,13,60,14" dtype_id="7">
+            <varref fl="c60" loc="c,60,15,60,22" name="state_q" dtype_id="7"/>
+            <varref fl="c60" loc="c,60,5,60,12" name="state_d" dtype_id="7"/>
+          </assign>
+          <case fl="c61" loc="c,61,12,61,16">
+            <varref fl="c61" loc="c,61,18,61,25" name="state_q" dtype_id="7"/>
+            <caseitem fl="c62" loc="c,62,13,62,14">
+              <const fl="c62" loc="c,62,7,62,13" name="2&apos;h0" dtype_id="7"/>
+              <if fl="c62" loc="c,62,15,62,17">
+                <varref fl="c62" loc="c,62,19,62,26" name="start_i" dtype_id="3"/>
+                <assign fl="c62" loc="c,62,36,62,37" dtype_id="7">
+                  <const fl="c62" loc="c,62,38,62,44" name="2&apos;h1" dtype_id="7"/>
+                  <varref fl="c62" loc="c,62,28,62,35" name="state_d" dtype_id="7"/>
+                </assign>
+              </if>
+            </caseitem>
+            <caseitem fl="c63" loc="c,63,13,63,14">
+              <const fl="c63" loc="c,63,7,63,13" name="2&apos;h1" dtype_id="7"/>
+              <assign fl="c63" loc="c,63,36,63,37" dtype_id="7">
+                <const fl="c63" loc="c,63,38,63,44" name="2&apos;h2" dtype_id="7"/>
+                <varref fl="c63" loc="c,63,28,63,35" name="state_d" dtype_id="7"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c64" loc="c,64,13,64,14">
+              <const fl="c64" loc="c,64,7,64,13" name="2&apos;h2" dtype_id="7"/>
+              <assign fl="c64" loc="c,64,36,64,37" dtype_id="7">
+                <const fl="c64" loc="c,64,38,64,44" name="2&apos;h3" dtype_id="7"/>
+                <varref fl="c64" loc="c,64,28,64,35" name="state_d" dtype_id="7"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c65" loc="c,65,13,65,14">
+              <const fl="c65" loc="c,65,7,65,13" name="2&apos;h3" dtype_id="7"/>
+              <assign fl="c65" loc="c,65,36,65,37" dtype_id="7">
+                <const fl="c65" loc="c,65,38,65,44" name="2&apos;h0" dtype_id="7"/>
+                <varref fl="c65" loc="c,65,28,65,35" name="state_d" dtype_id="7"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c66" loc="c,66,7,66,14">
+              <assign fl="c66" loc="c,66,36,66,37" dtype_id="7">
+                <const fl="c66" loc="c,66,38,66,44" name="2&apos;h0" dtype_id="7"/>
+                <varref fl="c66" loc="c,66,28,66,35" name="state_d" dtype_id="7"/>
+              </assign>
+            </caseitem>
+          </case>
+        </begin>
+      </always>
+      <always fl="c75" loc="c,75,3,75,12">
+        <sentree fl="c75" loc="c,75,13,75,14">
+          <senitem fl="c75" loc="c,75,15,75,22" edgeType="POS">
+            <varref fl="c75" loc="c,75,23,75,28" name="clk_i" dtype_id="3"/>
+          </senitem>
+          <senitem fl="c75" loc="c,75,32,75,39" edgeType="NEG">
+            <varref fl="c75" loc="c,75,40,75,46" name="rst_ni" dtype_id="3"/>
+          </senitem>
+        </sentree>
+        <begin fl="c75" loc="c,75,48,75,53">
+          <if fl="c76" loc="c,76,5,76,7">
+            <varref fl="c76" loc="c,76,10,76,16" name="rst_ni" dtype_id="3"/>
+            <begin fl="c82" loc="c,82,14,82,19">
+              <assign fl="c83" loc="c,83,16,83,17" dtype_id="7">
+                <varref fl="c83" loc="c,83,18,83,25" name="state_d" dtype_id="7"/>
+                <varref fl="c83" loc="c,83,7,83,14" name="state_q" dtype_id="7"/>
+              </assign>
+              <if fl="c84" loc="c,84,7,84,9">
+                <eq fl="c84" loc="c,84,19,84,21" dtype_id="3">
+                  <const fl="c84" loc="c,84,22,84,28" name="2&apos;h1" dtype_id="7"/>
+                  <varref fl="c84" loc="c,84,11,84,18" name="state_q" dtype_id="7"/>
+                </eq>
+                <begin fl="c84" loc="c,84,30,84,35">
+                  <assigndly fl="c85" loc="c,85,16,85,18" dtype_id="5">
+                    <varref fl="c85" loc="c,85,19,85,22" name="a_i" dtype_id="5"/>
+                    <varref fl="c85" loc="c,85,9,85,15" name="op_a_q" dtype_id="5"/>
+                  </assigndly>
+                  <assigndly fl="c86" loc="c,86,16,86,18" dtype_id="5">
+                    <varref fl="c86" loc="c,86,19,86,22" name="b_i" dtype_id="5"/>
+                    <varref fl="c86" loc="c,86,9,86,15" name="op_b_q" dtype_id="5"/>
+                  </assigndly>
+                  <assigndly fl="c87" loc="c,87,16,87,18" dtype_id="4">
+                    <varref fl="c87" loc="c,87,19,87,27" name="opcode_i" dtype_id="4"/>
+                    <varref fl="c87" loc="c,87,9,87,14" name="opc_q" dtype_id="4"/>
+                  </assigndly>
+                </begin>
+              </if>
+              <if fl="c89" loc="c,89,7,89,9">
+                <eq fl="c89" loc="c,89,19,89,21" dtype_id="3">
+                  <const fl="c89" loc="c,89,22,89,28" name="2&apos;h2" dtype_id="7"/>
+                  <varref fl="c89" loc="c,89,11,89,18" name="state_q" dtype_id="7"/>
+                </eq>
+                <begin fl="c89" loc="c,89,30,89,35">
+                  <assigndly fl="c90" loc="c,90,16,90,18" dtype_id="5">
+                    <add fl="c90" loc="c,90,25,90,26" dtype_id="5">
+                      <varref fl="c90" loc="c,90,19,90,24" name="acc_q" dtype_id="5"/>
+                      <varref fl="c90" loc="c,90,27,90,30" name="a_i" dtype_id="5"/>
+                    </add>
+                    <varref fl="c90" loc="c,90,9,90,14" name="acc_q" dtype_id="5"/>
+                  </assigndly>
+                </begin>
+              </if>
+            </begin>
+            <begin fl="c76" loc="c,76,18,76,23">
+              <assign fl="c77" loc="c,77,16,77,17" dtype_id="7">
+                <const fl="c77" loc="c,77,18,77,24" name="2&apos;h0" dtype_id="7"/>
+                <varref fl="c77" loc="c,77,7,77,14" name="state_q" dtype_id="7"/>
+              </assign>
+              <assigndly fl="c78" loc="c,78,16,78,18" dtype_id="5">
+                <const fl="c78" loc="c,78,19,78,21" name="32&apos;h0" dtype_id="5"/>
+                <varref fl="c78" loc="c,78,7,78,13" name="op_a_q" dtype_id="5"/>
+              </assigndly>
+              <assigndly fl="c79" loc="c,79,16,79,18" dtype_id="5">
+                <const fl="c79" loc="c,79,19,79,21" name="32&apos;h0" dtype_id="5"/>
+                <varref fl="c79" loc="c,79,7,79,13" name="op_b_q" dtype_id="5"/>
+              </assigndly>
+              <assigndly fl="c80" loc="c,80,16,80,18" dtype_id="4">
+                <const fl="c80" loc="c,80,19,80,21" name="4&apos;h0" dtype_id="4"/>
+                <varref fl="c80" loc="c,80,7,80,12" name="opc_q" dtype_id="4"/>
+              </assigndly>
+              <assigndly fl="c81" loc="c,81,16,81,18" dtype_id="5">
+                <const fl="c81" loc="c,81,19,81,21" name="32&apos;h0" dtype_id="5"/>
+                <varref fl="c81" loc="c,81,7,81,12" name="acc_q" dtype_id="5"/>
+              </assigndly>
+            </begin>
+          </if>
+        </begin>
+      </always>
+      <always fl="c101" loc="c,101,3,101,14">
+        <begin fl="c101" loc="c,101,15,101,20">
+          <if fl="c102" loc="c,102,5,102,7">
+            <eq fl="c102" loc="c,102,17,102,19" dtype_id="3">
+              <const fl="c102" loc="c,102,20,102,26" name="2&apos;h3" dtype_id="7"/>
+              <varref fl="c102" loc="c,102,9,102,16" name="state_q" dtype_id="7"/>
+            </eq>
+            <begin fl="c102" loc="c,102,28,102,33">
+              <assign fl="c103" loc="c,103,16,103,17" dtype_id="5">
+                <varref fl="c103" loc="c,103,18,103,23" name="acc_q" dtype_id="5"/>
+                <varref fl="c103" loc="c,103,7,103,15" name="result_o" dtype_id="5"/>
+              </assign>
+            </begin>
+          </if>
+        </begin>
+      </always>
+      <always fl="c113" loc="c,113,3,113,14">
+        <begin fl="c113" loc="c,113,15,113,20">
+          <case fl="c114" loc="c,114,5,114,9">
+            <varref fl="c114" loc="c,114,11,114,16" name="opc_q" dtype_id="4"/>
+            <caseitem fl="c115" loc="c,115,11,115,12">
+              <const fl="c115" loc="c,115,7,115,11" name="4&apos;h0" dtype_id="4"/>
+              <assign fl="c115" loc="c,115,20,115,21" dtype_id="3">
+                <eq fl="c115" loc="c,115,30,115,32" dtype_id="3">
+                  <varref fl="c115" loc="c,115,23,115,29" name="op_a_q" dtype_id="5"/>
+                  <varref fl="c115" loc="c,115,33,115,39" name="op_b_q" dtype_id="5"/>
+                </eq>
+                <varref fl="c115" loc="c,115,13,115,19" name="flag_o" dtype_id="3"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c116" loc="c,116,11,116,12">
+              <const fl="c116" loc="c,116,7,116,11" name="4&apos;h1" dtype_id="4"/>
+              <assign fl="c116" loc="c,116,20,116,21" dtype_id="3">
+                <neq fl="c116" loc="c,116,30,116,32" dtype_id="3">
+                  <varref fl="c116" loc="c,116,23,116,29" name="op_a_q" dtype_id="5"/>
+                  <varref fl="c116" loc="c,116,33,116,39" name="op_b_q" dtype_id="5"/>
+                </neq>
+                <varref fl="c116" loc="c,116,13,116,19" name="flag_o" dtype_id="3"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c117" loc="c,117,11,117,12">
+              <const fl="c117" loc="c,117,7,117,11" name="4&apos;h2" dtype_id="4"/>
+              <assign fl="c117" loc="c,117,20,117,21" dtype_id="3">
+                <lt fl="c117" loc="c,117,31,117,32" dtype_id="3">
+                  <varref fl="c117" loc="c,117,23,117,29" name="op_a_q" dtype_id="5"/>
+                  <varref fl="c117" loc="c,117,33,117,39" name="op_b_q" dtype_id="5"/>
+                </lt>
+                <varref fl="c117" loc="c,117,13,117,19" name="flag_o" dtype_id="3"/>
+              </assign>
+            </caseitem>
+            <caseitem fl="c118" loc="c,118,11,118,12">
+              <const fl="c118" loc="c,118,7,118,11" name="4&apos;h3" dtype_id="4"/>
+              <assign fl="c118" loc="c,118,20,118,21" dtype_id="3">
+                <gt fl="c118" loc="c,118,31,118,32" dtype_id="3">
+                  <varref fl="c118" loc="c,118,23,118,29" name="op_a_q" dtype_id="5"/>
+                  <varref fl="c118" loc="c,118,33,118,39" name="op_b_q" dtype_id="5"/>
+                </gt>
+                <varref fl="c118" loc="c,118,13,118,19" name="flag_o" dtype_id="3"/>
+              </assign>
+            </caseitem>
+          </case>
+        </begin>
+      </always>
+      <var fl="c130" loc="c,130,21,130,26" name="sum_w" dtype_id="5" vartype="logic" origName="sum_w"/>
+      <contassign fl="c131" loc="c,131,16,131,17" dtype_id="5">
+        <add fl="c131" loc="c,131,22,131,23" dtype_id="5">
+          <varref fl="c131" loc="c,131,18,131,21" name="a_i" dtype_id="5"/>
+          <extend fl="c131" loc="c,131,24,131,27" dtype_id="5" width="32" widthminv="8">
+            <varref fl="c131" loc="c,131,24,131,27" name="k_i" dtype_id="6"/>
+          </extend>
+        </add>
+        <varref fl="c131" loc="c,131,10,131,15" name="sum_w" dtype_id="5"/>
+      </contassign>
+      <contassign fl="c136" loc="c,136,17,136,18" dtype_id="3">
+        <neq fl="c136" loc="c,136,28,136,30" dtype_id="3">
+          <const fl="c136" loc="c,136,31,136,37" name="2&apos;h0" dtype_id="7"/>
+          <varref fl="c136" loc="c,136,20,136,27" name="state_q" dtype_id="7"/>
+        </neq>
+        <varref fl="c136" loc="c,136,10,136,16" name="busy_o" dtype_id="3"/>
+      </contassign>
+      <contassign fl="c137" loc="c,137,17,137,18" dtype_id="3">
+        <eq fl="c137" loc="c,137,28,137,30" dtype_id="3">
+          <const fl="c137" loc="c,137,31,137,37" name="2&apos;h3" dtype_id="7"/>
+          <varref fl="c137" loc="c,137,20,137,27" name="state_q" dtype_id="7"/>
+        </eq>
+        <varref fl="c137" loc="c,137,10,137,16" name="done_o" dtype_id="3"/>
+      </contassign>
+      <var fl="c145" loc="c,145,8,145,19" name="_unused_sum" dtype_id="3" vartype="logic" origName="_unused_sum"/>
+      <contassign fl="c145" loc="c,145,20,145,21" dtype_id="3">
+        <redor fl="c145" loc="c,145,22,145,23" dtype_id="3">
+          <varref fl="c145" loc="c,145,23,145,28" name="sum_w" dtype_id="5"/>
+        </redor>
+        <varref fl="c145" loc="c,145,8,145,19" name="_unused_sum" dtype_id="3"/>
+      </contassign>
+    </module>
+    <typetable fl="a0" loc="a,0,0,0,0">
+      <basicdtype fl="c41" loc="c,41,15,41,19" id="7" name="logic" left="1" right="0"/>
+      <basicdtype fl="c20" loc="c,20,13,20,16" id="1" name="int" left="31" right="0"/>
+      <basicdtype fl="c22" loc="c,22,10,22,15" id="3" name="logic"/>
+      <basicdtype fl="c26" loc="c,26,10,26,15" id="4" name="logic" left="3" right="0"/>
+      <basicdtype fl="c27" loc="c,27,10,27,15" id="5" name="logic" left="31" right="0"/>
+      <basicdtype fl="c29" loc="c,29,10,29,15" id="6" name="logic" left="7" right="0"/>
+      <enumdtype fl="c40" loc="c,40,11,40,15" id="8" name="cmd_alu.state_e" sub_dtype_id="7">
+        <enumitem fl="c41" loc="c,41,5,41,11" name="S_IDLE" dtype_id="7">
+          <const fl="c41" loc="c,41,15,41,19" name="2&apos;h0" dtype_id="7"/>
+        </enumitem>
+        <enumitem fl="c42" loc="c,42,5,42,11" name="S_LOAD" dtype_id="7">
+          <const fl="c42" loc="c,42,15,42,19" name="2&apos;h1" dtype_id="7"/>
+        </enumitem>
+        <enumitem fl="c43" loc="c,43,5,43,11" name="S_EXEC" dtype_id="7">
+          <const fl="c43" loc="c,43,15,43,19" name="2&apos;h2" dtype_id="7"/>
+        </enumitem>
+        <enumitem fl="c44" loc="c,44,5,44,11" name="S_DONE" dtype_id="7">
+          <const fl="c44" loc="c,44,15,44,19" name="2&apos;h3" dtype_id="7"/>
+        </enumitem>
+      </enumdtype>
+      <refdtype fl="c47" loc="c,47,3,47,10" id="9" name="state_e" sub_dtype_id="7"/>
+      <refdtype fl="c47" loc="c,47,3,47,10" id="10" name="state_e" sub_dtype_id="7"/>
+      <basicdtype fl="c20" loc="c,20,34,20,36" id="2" name="logic" left="31" right="0"/>
+    </typetable>
+  </netlist>
+</verilator_xml>

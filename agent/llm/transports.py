@@ -44,11 +44,11 @@ log = logging.getLogger("cogni.transports")
 # ---------------------------------------------------------------------------
 
 def _read_brief(call_dir: str) -> tuple[str, dict, dict]:
-    with open(os.path.join(call_dir, "prompt.md")) as f:
+    with open(os.path.join(call_dir, "prompt.md"), encoding="utf-8") as f:
         prompt = f.read()
-    with open(os.path.join(call_dir, "inputs.json")) as f:
+    with open(os.path.join(call_dir, "inputs.json"), encoding="utf-8") as f:
         inputs = json.load(f)
-    with open(os.path.join(call_dir, "schema.json")) as f:
+    with open(os.path.join(call_dir, "schema.json"), encoding="utf-8") as f:
         schema = json.load(f)
     return prompt, inputs, schema
 
@@ -84,7 +84,7 @@ def _extract_json(text: str) -> dict:
 
 
 def _write_output(call_dir: str, output: dict) -> None:
-    with open(os.path.join(call_dir, "output.json"), "w") as f:
+    with open(os.path.join(call_dir, "output.json"), "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2)
 
 
@@ -95,7 +95,7 @@ def _write_meta(call_dir: str, meta: dict) -> None:
     self-describing without needing the in-memory TransportResult.
     """
     try:
-        with open(os.path.join(call_dir, "meta.json"), "w") as f:
+        with open(os.path.join(call_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
     except Exception:
         # Never let metadata-writing kill a real result.
@@ -110,7 +110,7 @@ def _write_error(call_dir: str, error: str, attempts: int, raw_text: str = "") -
     auditable across runs.
     """
     try:
-        with open(os.path.join(call_dir, "error.txt"), "w") as f:
+        with open(os.path.join(call_dir, "error.txt"), "w", encoding="utf-8") as f:
             f.write(f"attempts: {attempts}\nerror: {error}\n")
             if raw_text:
                 f.write(f"---\nlast raw response:\n{raw_text[:4000]}\n")
@@ -509,13 +509,25 @@ class BedrockTransport(Transport):
 # cross-region inference profiles; override per role via env to match your
 # region's Bedrock console (Model access -> the id shown there). Switch
 # verifier 2 from Mistral to Nova by setting COGNI_BEDROCK_VERIFY2_MODEL.
-_BEDROCK_PREDICT_MODEL = os.environ.get(
-    "COGNI_BEDROCK_PREDICT_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-_BEDROCK_VERIFY1_MODEL = os.environ.get(
-    "COGNI_BEDROCK_VERIFY1_MODEL", "us.meta.llama3-3-70b-instruct-v1:0")
-_BEDROCK_VERIFY2_MODEL = os.environ.get(
-    # Alt (cheaper, native-Converse JSON): "us.amazon.nova-pro-v1:0"
-    "COGNI_BEDROCK_VERIFY2_MODEL", "mistral.mistral-large-2407-v1:0")
+#
+# Two tiers, picked by COGNI_TEST_MODE (read here at import):
+#   production : Claude Sonnet + Llama-70B + Mistral Large  (high models)
+#   test       : Claude Haiku  + Llama-8B  + Nova Lite       (cheap models)
+# Per-role env overrides win over both tiers.
+_BEDROCK_TEST_TIER = os.environ.get("COGNI_TEST_MODE", "").strip() in ("1", "true", "yes")
+
+if _BEDROCK_TEST_TIER:
+    _DEF_PREDICT = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    _DEF_VERIFY1 = "us.meta.llama3-1-8b-instruct-v1:0"
+    _DEF_VERIFY2 = "us.amazon.nova-lite-v1:0"
+else:
+    _DEF_PREDICT = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    _DEF_VERIFY1 = "us.meta.llama3-3-70b-instruct-v1:0"
+    _DEF_VERIFY2 = "mistral.mistral-large-2407-v1:0"  # or "us.amazon.nova-pro-v1:0"
+
+_BEDROCK_PREDICT_MODEL = os.environ.get("COGNI_BEDROCK_PREDICT_MODEL", _DEF_PREDICT)
+_BEDROCK_VERIFY1_MODEL = os.environ.get("COGNI_BEDROCK_VERIFY1_MODEL", _DEF_VERIFY1)
+_BEDROCK_VERIFY2_MODEL = os.environ.get("COGNI_BEDROCK_VERIFY2_MODEL", _DEF_VERIFY2)
 
 _MODEL_ROUTING: dict[str, tuple[type, str]] = {
     # Anthropic
@@ -584,7 +596,7 @@ async def run_briefs_concurrently(
             if on_progress:
                 on_progress(idx, brief, "cached", 0.0)
             return TransportResult(
-                True, json.load(open(out)), "", 0.0,
+                True, json.load(open(out, encoding="utf-8")), "", 0.0,
                 error=None, transport="cache", model=brief.get("model", ""),
             )
         tport = transport_for_model(brief["model"])

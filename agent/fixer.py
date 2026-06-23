@@ -80,7 +80,7 @@ PROPOSE_SCHEMA = {
         "target_file":         {"type": "string"},
         "patch_unified_diff":  {"type": "string"},
         "rationale":           {"type": "string"},
-        "confidence":          {"type": "string", "enum": ["likely", "uncertain", "unlikely"]},
+        "confidence":          {"type": "string", "enum": ["likely", "uncertain", "unlikely", "high", "medium", "low"]},
         "decision":            {"type": "string", "enum": ["propose", "refuse"]},
         "missing_evidence":    {"type": "array", "items": {"type": "string"}},
     },

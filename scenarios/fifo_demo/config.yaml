@@ -27,7 +27,7 @@ perceiver:
   top: sync_fifo
   rtl_files: scenarios/fifo_demo/rtl/sync_fifo.sv
   code_origin: human
-  author_intent: "Synchronous FIFO; clean design except one subtle width mismatch on the full-flag compare"
+  author_intent: "Synchronous FIFO with parameterizable depth and data width"
 
 # Oracle: replay the real Verilator findings (1 WIDTH, rest 0).
 oracle:

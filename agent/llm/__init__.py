@@ -35,17 +35,45 @@ import os as _os
 
 _TEST_MODE = _os.environ.get("COGNI_TEST_MODE", "").strip() in ("1", "true", "yes")
 
-MODEL_OPUS         = "claude_sonnet_4_6" if _TEST_MODE else "claude_opus_4_7"
+# Bedrock is the ONLY model path by default: every role (predict, both
+# verifiers, reflect, and the fixer) runs on AWS Bedrock-hosted models —
+# one AWS privacy boundary, and only AWS credentials are required (no
+# ANTHROPIC/OPENAI/GOOGLE keys). The three subagent ids below resolve to
+# concrete Bedrock model ids in transports.py (_MODEL_ROUTING), each
+# overridable via env. Bedrock takes precedence over the test-mode swap.
+#
+# Escape hatch — opt back into the direct vendor APIs (Anthropic/OpenAI/
+# Google) with COGNI_BEDROCK=0  (or COGNI_DIRECT_API=1).
+_DIRECT_API = (
+    _os.environ.get("COGNI_BEDROCK", "").strip() in ("0", "false", "no")
+    or _os.environ.get("COGNI_DIRECT_API", "").strip() in ("1", "true", "yes")
+)
+_BEDROCK_MODE = not _DIRECT_API
+
+if _BEDROCK_MODE:
+    MODEL_OPUS   = "bedrock_claude"     # predictor / reflector  (Claude on Bedrock)
+    MODEL_GPT    = "bedrock_llama"      # verifier 1             (Llama on Bedrock)
+    MODEL_GEMINI = "bedrock_mistral"    # verifier 2             (Mistral/Nova on Bedrock)
+else:
+    MODEL_OPUS   = "claude_sonnet_4_6" if _TEST_MODE else "claude_opus_4_7"
+    MODEL_GPT    = "gpt_5_4_mini" if _TEST_MODE else "gpt_5_4"
+    MODEL_GEMINI = "gemini_3_1_pro"
+
 MODEL_SONNET       = "claude_sonnet_4_6"
-MODEL_GPT          = "gpt_5_4_mini" if _TEST_MODE else "gpt_5_4"
 MODEL_GPT_MINI     = "gpt_5_4_mini"
-MODEL_GEMINI       = "gemini_3_1_pro"
 MODEL_GEMINI_FLASH = "gemini_3_flash"
 
 
 def is_test_mode() -> bool:
     """True when COGNI_TEST_MODE is set. Used by run banners and logging."""
     return _TEST_MODE
+
+
+def is_bedrock_mode() -> bool:
+    """True when all roles run on AWS Bedrock. This is the DEFAULT; it is
+    only False when COGNI_BEDROCK=0 / COGNI_DIRECT_API=1 selects the direct
+    vendor APIs."""
+    return _BEDROCK_MODE
 
 
 def enable_test_mode() -> None:
@@ -63,6 +91,10 @@ def enable_test_mode() -> None:
     global _TEST_MODE, MODEL_OPUS, MODEL_GPT
     _os.environ["COGNI_TEST_MODE"] = "1"
     _TEST_MODE = True
+    # In Bedrock mode the role->model mapping is fixed to Bedrock ids; the
+    # test-mode swap must not clobber it.
+    if _BEDROCK_MODE:
+        return
     MODEL_OPUS = "claude_sonnet_4_6"
     MODEL_GPT = "gpt_5_4_mini"
     # Propagate to organs.py if already imported (it does

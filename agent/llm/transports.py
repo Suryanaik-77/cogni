@@ -12,6 +12,8 @@ Vendors supported:
   - ClaudeTransport      (claude-opus, claude-sonnet via anthropic)
   - OpenAITransport      (gpt-5 family via openai)
   - GeminiTransport      (gemini-2.5-pro/flash via google-genai)
+  - BedrockTransport     (Claude / Llama / Mistral / Nova via AWS Bedrock
+                          Converse API — one AWS privacy boundary)
 
 All transports load .env once on import and never log keys.
 """
@@ -399,8 +401,121 @@ class GeminiTransport(Transport):
 
 
 # ---------------------------------------------------------------------------
+# AWS Bedrock (Claude / Llama / Mistral / Nova via the Converse API)
+# ---------------------------------------------------------------------------
+
+class BedrockTransport(Transport):
+    """One transport for ALL Bedrock-hosted models, via the Converse API.
+
+    The Converse API normalizes request/response shape across model families
+    (Anthropic, Meta, Mistral, Amazon), so a single class covers Claude
+    (predictor) + Llama + Mistral/Nova (verifiers) with no per-vendor code.
+
+    boto3 is synchronous, so each call is off-loaded to a thread to preserve
+    the orchestrator's asyncio fan-out.
+
+    Auth: standard AWS credential chain (env vars / ~/.aws/credentials / IAM
+    role) + region — NO api key in .env. Prompts and outputs stay inside your
+    AWS account; AWS does not train on them. Set AWS_REGION (or pass region)
+    to a region where your chosen models are enabled.
+
+    Reasoning models (e.g. DeepSeek-R1) emit a separate `reasoningContent`
+    block; we read only `text` blocks, so chain-of-thought is dropped before
+    JSON extraction. (The four models we ship with all support Converse
+    `system` + `temperature`.)
+    """
+    name = "bedrock"
+
+    def __init__(self, model: str,
+                 region: str | None = None,
+                 max_tokens: int = 8000,
+                 max_retries: int = 2,
+                 temperature: float = 0.0):
+        import boto3
+        self.model = model
+        self.region = (region
+                       or os.environ.get("AWS_REGION")
+                       or os.environ.get("AWS_DEFAULT_REGION")
+                       or "us-east-1")
+        self._client = boto3.client("bedrock-runtime", region_name=self.region)
+        self.max_tokens = max_tokens
+        self.max_retries = max_retries
+        self.temperature = temperature
+
+    def _invoke_sync(self, user: str) -> tuple[str, int, int]:
+        resp = self._client.converse(
+            modelId=self.model,
+            messages=[{"role": "user", "content": [{"text": user}]}],
+            system=[{"text": "You are a precise reasoning component. "
+                             "Return only valid JSON matching the requested schema."}],
+            inferenceConfig={"maxTokens": self.max_tokens,
+                             "temperature": self.temperature},
+        )
+        blocks = resp["output"]["message"]["content"]
+        # Only answer text; ignore reasoningContent (R1-style chain-of-thought).
+        text = "".join(b["text"] for b in blocks if "text" in b)
+        usage = resp.get("usage", {})
+        return text, int(usage.get("inputTokens", 0)), int(usage.get("outputTokens", 0))
+
+    async def arun(self, call_dir: str) -> TransportResult:
+        prompt, inputs, schema = _read_brief(call_dir)
+        user = _build_user_message(prompt, inputs, schema)
+        t0 = time.time()
+        last_err = None
+        last_text = ""
+        for attempt in range(self.max_retries + 1):
+            try:
+                text, in_tok, out_tok = await asyncio.to_thread(self._invoke_sync, user)
+                last_text = text
+                output = _extract_json(text)
+                validate_schema(output, schema)
+                _write_output(call_dir, output)
+                elapsed = time.time() - t0
+                _write_meta(call_dir, {
+                    "ok": True, "transport": self.name, "model": self.model,
+                    "elapsed_s": elapsed, "attempts": attempt + 1,
+                    "input_tokens": in_tok, "output_tokens": out_tok,
+                })
+                return TransportResult(
+                    True, output, text, elapsed,
+                    transport=self.name, model=self.model,
+                    input_tokens=in_tok, output_tokens=out_tok, attempts=attempt + 1,
+                )
+            except Exception as e:
+                last_err = e
+                log.warning("bedrock(%s) attempt %d failed: %s", self.model, attempt + 1, e)
+                if attempt < self.max_retries:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+        elapsed = time.time() - t0
+        err_str = f"{type(last_err).__name__}: {last_err}"
+        _write_error(call_dir, err_str, self.max_retries + 1, last_text)
+        _write_meta(call_dir, {
+            "ok": False, "transport": self.name, "model": self.model,
+            "elapsed_s": elapsed, "attempts": self.max_retries + 1,
+            "error": err_str,
+        })
+        return TransportResult(
+            False, None, last_text, elapsed,
+            error=err_str, transport=self.name, model=self.model,
+            attempts=self.max_retries + 1,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Routing: subagent-style model id -> transport instance
 # ---------------------------------------------------------------------------
+
+# Bedrock model ids are REGION-SPECIFIC. The defaults below use US
+# cross-region inference profiles; override per role via env to match your
+# region's Bedrock console (Model access -> the id shown there). Switch
+# verifier 2 from Mistral to Nova by setting COGNI_BEDROCK_VERIFY2_MODEL.
+_BEDROCK_PREDICT_MODEL = os.environ.get(
+    "COGNI_BEDROCK_PREDICT_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+_BEDROCK_VERIFY1_MODEL = os.environ.get(
+    "COGNI_BEDROCK_VERIFY1_MODEL", "us.meta.llama3-3-70b-instruct-v1:0")
+_BEDROCK_VERIFY2_MODEL = os.environ.get(
+    # Alt (cheaper, native-Converse JSON): "us.amazon.nova-pro-v1:0"
+    "COGNI_BEDROCK_VERIFY2_MODEL", "mistral.mistral-large-2407-v1:0")
 
 _MODEL_ROUTING: dict[str, tuple[type, str]] = {
     # Anthropic
@@ -412,6 +527,11 @@ _MODEL_ROUTING: dict[str, tuple[type, str]] = {
     # Google
     "gemini_3_1_pro":    (GeminiTransport, "gemini-2.5-flash"),  # Pro requires paid; fall back to Flash
     "gemini_3_flash":    (GeminiTransport, "gemini-2.5-flash"),
+    # AWS Bedrock — one Converse transport, model id resolved per role.
+    # Activated by COGNI_BEDROCK=1 (see agent/llm/__init__.py).
+    "bedrock_claude":    (BedrockTransport, _BEDROCK_PREDICT_MODEL),  # predictor/reflector
+    "bedrock_llama":     (BedrockTransport, _BEDROCK_VERIFY1_MODEL),  # verifier 1
+    "bedrock_mistral":   (BedrockTransport, _BEDROCK_VERIFY2_MODEL),  # verifier 2 (or Nova via env)
 }
 
 

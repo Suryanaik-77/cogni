@@ -7,6 +7,7 @@
 anthropic>=0.34.0      # Claude (proposer + reviser + reflector)
 openai>=1.40.0         # GPT-5 family (verifier)
 google-genai>=0.3.0    # Gemini (verifier)
+boto3>=1.34.0          # AWS Bedrock (Claude/Llama/Mistral/Nova) — enable with COGNI_BEDROCK=1
 
 # Loads ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY from .env
 python-dotenv>=1.0.0

@@ -41,10 +41,30 @@ _PRICING: dict[str, tuple[float, float]] = {
     "gemini-2.5-pro":      (1.25, 10.0),
 }
 
+# Bedrock model ids are long & region-prefixed (e.g.
+# "us.meta.llama3-3-70b-instruct-v1:0"), so they're matched by keyword
+# rather than exact id. Approximate Bedrock list prices per 1M tokens.
+_BEDROCK_PRICING: list[tuple[str, tuple[float, float]]] = [
+    ("claude-opus",   (15.0, 75.0)),
+    ("claude-sonnet", (3.0,  15.0)),
+    ("claude-haiku",  (0.80, 4.0)),
+    ("llama",         (0.72, 0.72)),
+    ("mistral-large", (2.0,  6.0)),
+    ("nova-pro",      (0.80, 3.20)),
+    ("nova-lite",     (0.06, 0.24)),
+]
+
 
 def _price(model: str, in_tok: int, out_tok: int) -> float:
     """Return USD cost; 0.0 if model unknown so we never crash on rollup."""
     p = _PRICING.get(model)
+    if not p:
+        # Bedrock ids: substring-match against the keyword table.
+        m = model.lower()
+        for needle, rate in _BEDROCK_PRICING:
+            if needle in m:
+                p = rate
+                break
     if not p:
         return 0.0
     return (in_tok * p[0] + out_tok * p[1]) / 1_000_000.0

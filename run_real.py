@@ -46,6 +46,7 @@ from agent import organs, verdict as verdict_engine
 from agent.llm import (
     LLMCall, validate_schema,
     MODEL_OPUS, MODEL_GPT, MODEL_GEMINI, is_test_mode, enable_test_mode,
+    is_bedrock_mode,
 )
 import agent.llm as _llm
 from agent.llm.transports import (
@@ -61,7 +62,7 @@ VENDOR_GEMINI_MODEL = "gemini-2.5-flash"  # Flash works on free tier; Pro requir
 
 
 
-SESSION_ROOT = "/home/user/workspace/cogni/runs/real"
+SESSION_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", "real")
 
 
 # ---------------------------------------------------------------------------
@@ -338,9 +339,15 @@ def cmd_verify_api(session_dir: str):
         pending_doc = json.load(f)
     pending = pending_doc["briefs"] if isinstance(pending_doc, dict) else pending_doc
 
-    # Lazy-init transports once.
-    gpt = OpenAITransport(model=VENDOR_GPT_MODEL)
-    gem = GeminiTransport(model=VENDOR_GEMINI_MODEL)
+    # Lazy-init transports once. In Bedrock mode both verifiers run on
+    # Bedrock-hosted models (Llama + Mistral/Nova); otherwise GPT + Gemini.
+    if is_bedrock_mode():
+        from agent.llm.transports import transport_for_model
+        gpt = transport_for_model("bedrock_llama")
+        gem = transport_for_model("bedrock_mistral")
+    else:
+        gpt = OpenAITransport(model=VENDOR_GPT_MODEL)
+        gem = GeminiTransport(model=VENDOR_GEMINI_MODEL)
 
     n_ok = n_fail = 0
     for brief in pending:
@@ -735,7 +742,20 @@ if __name__ == "__main__":
         _self.MODEL_OPUS = _llm.MODEL_OPUS
         _self.MODEL_GPT  = _llm.MODEL_GPT
         _self.VENDOR_GPT_MODEL = "gpt-5-mini"
-    if is_test_mode():
+    if is_bedrock_mode():
+        from agent.llm.transports import (
+            _BEDROCK_PREDICT_MODEL, _BEDROCK_VERIFY1_MODEL, _BEDROCK_VERIFY2_MODEL,
+        )
+        print("=" * 70)
+        print("  COGNI_BEDROCK active  \u2014  all roles on AWS Bedrock "
+              f"(region={os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION') or 'us-east-1'}):")
+        print(f"     predictor/reflector : {_BEDROCK_PREDICT_MODEL}")
+        print(f"     verifier 1          : {_BEDROCK_VERIFY1_MODEL}")
+        print(f"     verifier 2          : {_BEDROCK_VERIFY2_MODEL}")
+        print("  Data stays in your AWS account. Override ids via "
+              "COGNI_BEDROCK_{PREDICT,VERIFY1,VERIFY2}_MODEL.")
+        print("=" * 70)
+    elif is_test_mode():
         # Banner so the run is unmistakable in logs.
         print("=" * 70)
         print("  COGNI_TEST_MODE active  \u2014  models swapped:")

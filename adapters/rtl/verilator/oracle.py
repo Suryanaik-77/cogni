@@ -63,21 +63,14 @@ _CLASS_TO_KEY: dict[str, str] = {
     "UNOPTFLAT":      "rtl.lint.unoptflat.count",
 }
 
-# Every measurement key the RTL pack may ask about. Defaulted to 0 so a
-# question about a category Verilator didn't flag grades as "none found"
-# rather than "unmeasured".
-_ALL_LINT_KEYS: list[str] = [
-    "rtl.lint.latch.count", "rtl.lint.case_incomplete.count",
-    "rtl.lint.fsm_no_default.count", "rtl.lint.blkseq.count",
-    "rtl.lint.width.count", "rtl.lint.cdc_unsync.count",
-    "rtl.lint.cdc_multibit.count", "rtl.lint.async_uncontrollable.count",
-    "rtl.lint.gated_clock.count", "rtl.lint.implicit_net.count",
-    "rtl.lint.multidriven.count", "rtl.lint.unoptflat.count",
-    "rtl.lint.full_case_pragma.count", "rtl.lint.invented_primitive.count",
-    "rtl.lint.defparam_or_define_config.count", "rtl.lint.hierref.count",
-    "rtl.lint.nonsynth.count", "rtl.lint.unreachable_state.count",
-    "rtl.lint.rdc.count",
-]
+# The measurement keys Verilator's lint genuinely COVERS — exactly the keys
+# in _CLASS_TO_KEY. Only these are seeded to 0, where a 0 truthfully means
+# "Verilator checked and found none." Categories Verilator does NOT analyze
+# (CDC, RDC, FSM reachability/default, invented primitives, gated clocks, ...)
+# are deliberately left ABSENT from the measurements, so a question about them
+# grades as `unfalsifiable` ("the tool can't measure this") instead of a
+# misleading 0 that reads as "no problem."
+_VERILATOR_COVERED_KEYS: set[str] = set(_CLASS_TO_KEY.values())
 
 
 class VerilatorRTLOracle:
@@ -157,7 +150,9 @@ class VerilatorRTLOracle:
         classes = lint_counts(files, top=self.top,
                               verilator_bin=self.verilator_bin,
                               extra_args=["-Wall", "-Wno-fatal"])
-        measurements: dict = {k: 0 for k in _ALL_LINT_KEYS}
+        # Seed only Verilator-covered categories to 0 (real "checked, none
+        # found"); leave everything else absent (-> unfalsifiable).
+        measurements: dict = {k: 0 for k in _VERILATOR_COVERED_KEYS}
         for cls, n in classes.items():
             key = _CLASS_TO_KEY.get(cls)
             if key:

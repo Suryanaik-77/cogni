@@ -233,6 +233,9 @@ def sweep(pack: dict,
     n_violations = n_clean = n_skipped = n_na = n_applicable = 0
 
     for r in rules:
+        # ---- retired rules never fire (recall skips them too) ----
+        if r.get("status") == "retired":
+            continue
         # ---- stage filter ----
         if stage_filter is not None:
             r_stages = (r.get("applies_to") or {}).get("stage", [])

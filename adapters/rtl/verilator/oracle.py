@@ -42,6 +42,42 @@ import json
 import os
 
 from agent.core import Reality, new_id
+from agent.fix_verify import lint_counts, gather_rtl_files
+
+
+# Verilator warning class -> rtl.lint.* measurement key. Several width
+# subclasses fold into one key. Classes with no rule mapping are ignored.
+_CLASS_TO_KEY: dict[str, str] = {
+    "WIDTH":          "rtl.lint.width.count",
+    "WIDTHEXPAND":    "rtl.lint.width.count",
+    "WIDTHTRUNC":     "rtl.lint.width.count",
+    "WIDTHCONCAT":    "rtl.lint.width.count",
+    "LATCH":          "rtl.lint.latch.count",
+    "BLKSEQ":         "rtl.lint.blkseq.count",
+    "COMBDLY":        "rtl.lint.blkseq.count",
+    "CASEINCOMPLETE": "rtl.lint.case_incomplete.count",
+    "CASEOVERLAP":    "rtl.lint.full_case_pragma.count",
+    "CASEX":          "rtl.lint.full_case_pragma.count",
+    "IMPLICIT":       "rtl.lint.implicit_net.count",
+    "MULTIDRIVEN":    "rtl.lint.multidriven.count",
+    "UNOPTFLAT":      "rtl.lint.unoptflat.count",
+}
+
+# Every measurement key the RTL pack may ask about. Defaulted to 0 so a
+# question about a category Verilator didn't flag grades as "none found"
+# rather than "unmeasured".
+_ALL_LINT_KEYS: list[str] = [
+    "rtl.lint.latch.count", "rtl.lint.case_incomplete.count",
+    "rtl.lint.fsm_no_default.count", "rtl.lint.blkseq.count",
+    "rtl.lint.width.count", "rtl.lint.cdc_unsync.count",
+    "rtl.lint.cdc_multibit.count", "rtl.lint.async_uncontrollable.count",
+    "rtl.lint.gated_clock.count", "rtl.lint.implicit_net.count",
+    "rtl.lint.multidriven.count", "rtl.lint.unoptflat.count",
+    "rtl.lint.full_case_pragma.count", "rtl.lint.invented_primitive.count",
+    "rtl.lint.defparam_or_define_config.count", "rtl.lint.hierref.count",
+    "rtl.lint.nonsynth.count", "rtl.lint.unreachable_state.count",
+    "rtl.lint.rdc.count",
+]
 
 
 class VerilatorRTLOracle:
@@ -66,11 +102,17 @@ class VerilatorRTLOracle:
                  rtl_root: str | None = None,
                  reports_dir: str | None = None,
                  findings_path: str | None = None,
+                 rtl_files: list[str] | None = None,
+                 verilator_bin: str = "verilator",
                  source_label: str = "verilator"):
         self.top = top
         self.rtl_root = rtl_root
         self.reports_dir = reports_dir
         self.findings_path = findings_path
+        if isinstance(rtl_files, str):
+            rtl_files = [p.strip() for p in rtl_files.split(",") if p.strip()]
+        self.rtl_files = list(rtl_files) if rtl_files else []
+        self.verilator_bin = verilator_bin
         self.source_label = source_label
 
     def from_findings_file(self) -> Reality:
@@ -96,12 +138,40 @@ class VerilatorRTLOracle:
             artifacts=[self.findings_path],
         )
 
-    def from_existing(self) -> Reality:
-        # If a findings file is supplied, prefer it.
-        if self.findings_path:
-            return self.from_findings_file()
-        raise NotImplementedError(
-            "VerilatorRTLOracle is a skeleton without findings_path. "
-            "Pass findings_path to replay a precomputed lint dump, or "
-            "wire a live verilator invocation in this method."
+    def from_live_lint(self) -> Reality:
+        """Run `verilator --lint-only -Wall` over the RTL and turn the real
+        warning counts into rtl.lint.* measurements (the answer key).
+
+        -Wall is needed so hazard classes like BLKSEQ/LATCH are reported
+        (default lint omits them). This is the TRUE reality — it can and
+        does differ from hand-written findings files.
+        """
+        files = list(self.rtl_files)
+        if not files and self.rtl_root and os.path.isdir(self.rtl_root):
+            files = gather_rtl_files(self.rtl_root)
+        if not files:
+            raise FileNotFoundError(
+                "VerilatorRTLOracle: no findings_path and no rtl_files/rtl_root "
+                "to lint. Provide one so the oracle has an answer key."
+            )
+        classes = lint_counts(files, top=self.top,
+                              verilator_bin=self.verilator_bin,
+                              extra_args=["-Wall", "-Wno-fatal"])
+        measurements: dict = {k: 0 for k in _ALL_LINT_KEYS}
+        for cls, n in classes.items():
+            key = _CLASS_TO_KEY.get(cls)
+            if key:
+                measurements[key] = measurements.get(key, 0) + n
+        return Reality(
+            id=new_id("real"),
+            source=f"{self.source_label}:live-lint",
+            measurements=measurements,
+            artifacts=list(files),
         )
+
+    def from_existing(self) -> Reality:
+        # A findings file (if it exists) is an explicit answer key; otherwise
+        # run Verilator live to produce the real one.
+        if self.findings_path and os.path.exists(self.findings_path):
+            return self.from_findings_file()
+        return self.from_live_lint()

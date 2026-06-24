@@ -140,10 +140,14 @@ def cmd_prepare(scenario_dirs: list[str]):
         # Build (question, world, reality) triples
         triples = []
         # Single-shot perceive scenarios: one world, one reality, N questions.
-        # Covers ibex_signoff (legacy), ibex_synth (v1 synth pack on Ibex),
-        # rtl_demo (v1 RTL pack on cmd_alu.sv), and any future scenario that
-        # ships a questions.json + a perceiver/oracle pair.
-        if name in ("ibex_signoff", "ibex_synth", "rtl_demo", "fifo_demo"):
+        # ANY scenario with a perceiver/oracle pair qualifies — questions come
+        # from questions.json or are auto-generated. So you can drop in a new
+        # scenario folder and run it without editing this file.
+        _qs_path = os.path.join(scen_dir, "questions.json")
+        _can_run = (os.path.exists(_qs_path)
+                    or str(cfg.get("generate_questions", "")).lower() in ("true", "1", "yes")
+                    or cfg.get("stage") in ("rtl", "synth"))
+        if _can_run:
             # Build the world first (live Verilator facts), so questions can be
             # auto-generated from it when no questions.json is provided.
             perceive_input = [cfg["rtl_root"]] if cfg.get("rtl_root") else []

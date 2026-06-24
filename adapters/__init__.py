@@ -70,6 +70,8 @@ def _verilator_oracle(cfg: dict[str, Any]):
         rtl_root=cfg.get("rtl_root"),
         reports_dir=cfg.get("reports_dir"),
         findings_path=cfg.get("findings_path"),
+        rtl_files=cfg.get("rtl_files"),
+        verilator_bin=cfg.get("verilator_bin", "verilator"),
     )
 
 

@@ -405,7 +405,7 @@ def cmd_verify_api(session_dir: str):
 # Stage 4: REFLECT — collect verifier outputs, compute verdicts, write reflect briefs
 # ---------------------------------------------------------------------------
 
-def cmd_reflect(session_dir: str):
+def cmd_reflect(session_dir: str, verify: bool = True):
     state = _load_state(session_dir, "session")
     reflect_briefs = []
 
@@ -416,13 +416,19 @@ def cmd_reflect(session_dir: str):
             if qrec.get("outcome") != "predicted":
                 continue
 
-            # Load verifier verdicts (informational only; no revision round in this run)
-            v_gpt = _load_output(f"{scen_name}.{qid}.verify_gpt", session_dir, organs.VERIFIER_SCHEMA) or {"agrees": True, "concerns": [], "suggested_revisions": []}
-            v_gem = _load_output(f"{scen_name}.{qid}.verify_gemini", session_dir, organs.VERIFIER_SCHEMA) or {"agrees": True, "concerns": [], "suggested_revisions": []}
-            qrec["verifier_verdicts"] = [
-                {"verifier_model": MODEL_GPT, **v_gpt},
-                {"verifier_model": MODEL_GEMINI, **v_gem},
-            ]
+            # Load verifier verdicts (informational only; no revision round in
+            # this run). The panel is opt-in: when it wasn't run, record an empty
+            # list rather than fabricating "agrees" placeholders that would read
+            # as a passed check in the summary.
+            if verify:
+                v_gpt = _load_output(f"{scen_name}.{qid}.verify_gpt", session_dir, organs.VERIFIER_SCHEMA) or {"agrees": True, "concerns": [], "suggested_revisions": []}
+                v_gem = _load_output(f"{scen_name}.{qid}.verify_gemini", session_dir, organs.VERIFIER_SCHEMA) or {"agrees": True, "concerns": [], "suggested_revisions": []}
+                qrec["verifier_verdicts"] = [
+                    {"verifier_model": MODEL_GPT, **v_gpt},
+                    {"verifier_model": MODEL_GEMINI, **v_gem},
+                ]
+            else:
+                qrec["verifier_verdicts"] = []
 
             # Compute Verdict
             with open(qrec["reality_path"]) as f:
@@ -845,8 +851,9 @@ def cmd_fix_phase(session_dir: str, concurrency: int = 4) -> None:
                                    concurrency=concurrency)
         patches = [{"target_file": f.target_file,
                     "patch_unified_diff": f.patch_unified_diff,
+                    "fixed_file": f.fixed_file,
                     "rule_id": f.rule_id}
-                   for f in fixes if f.patch_unified_diff]
+                   for f in fixes if (f.patch_unified_diff or f.fixed_file)]
         print(f"[with-fixes] {scen_name}: {len(patches)} patch(es) proposed")
         if not patches:
             continue
@@ -856,9 +863,245 @@ def cmd_fix_phase(session_dir: str, concurrency: int = 4) -> None:
         print(format_report(res))
 
 
+# ---------------------------------------------------------------------------
+# READY — RTL -> gate-level readiness gate, with auto-fix-until-ready loop
+# ---------------------------------------------------------------------------
+
+def _repoint_cfg(cfg: dict, orig_root: str, new_root: str) -> dict:
+    """Copy `cfg` with every RTL path under `orig_root` rewritten to `new_root`,
+    so the perceiver + oracle measure the WORKING copy instead of the original."""
+    import copy
+    c = copy.deepcopy(cfg)
+    ao = os.path.abspath(orig_root)
+
+    def rep(p):
+        if not isinstance(p, str):
+            return p
+        ap = os.path.abspath(p)
+        if ap == ao:
+            return new_root
+        if ap.startswith(ao + os.sep):
+            return os.path.join(new_root, os.path.relpath(ap, ao))
+        return p
+
+    def rep_files(val):
+        if isinstance(val, str):
+            return ",".join(rep(x.strip()) for x in val.split(",") if x.strip())
+        if isinstance(val, list):
+            return [rep(x) for x in val]
+        return val
+
+    for sub in ("perceiver", "oracle"):
+        d = c.get(sub) or {}
+        if "rtl_root" in d:
+            d["rtl_root"] = rep(d["rtl_root"])
+        if "rtl_files" in d:
+            d["rtl_files"] = rep_files(d["rtl_files"])
+        c[sub] = d
+    if "rtl_root" in c:
+        c["rtl_root"] = rep(c["rtl_root"])
+    return c
+
+
+def cmd_ready(args: list[str], *, max_rounds: int = 3, fix: bool = True,
+              netlist: bool = True, learn: bool = True, concurrency: int = 4) -> None:
+    """RTL -> gate-level readiness gate, with the REAL netlist step.
+
+    One command, the whole loop:
+      1. RTL gate   : sweep the RTL (live Verilator) -> GO/NO-GO, grouped by the
+                      downstream stage each violation would break.
+      2. fix        : (unless --no-fix) propose a fix per blocker, apply to a
+                      WORKING COPY, re-measure. Repeat until RTL is clean.
+      3. NETLIST gate: once RTL is clean, actually SYNTHESIZE with Yosys and
+                      check the real netlist for hazards that only appear in
+                      gates (inferred latch cells, multidriven nets). Any found
+                      are fed back as blockers and fixed in RTL.
+      4. repeat until the design passes BOTH gates, stops progressing, or hits
+         --max-rounds.
+
+    The original source is never touched; cleaned RTL + one `.patch` per changed
+    file land under <scenario>/ready_out/. If Yosys isn't installed the netlist
+    gate reports UNVERIFIED (never a false GO).
+    """
+    from agent.sweep import sweep
+    from agent.fixer import propose_fixes_sync
+    from agent.fix_verify import (lint_counts, gather_rtl_files,
+                                  synthesize_diffs, _write_fixed_file, _apply_patch)
+    from agent import gate as gate_mod
+    import shutil
+
+    if not args:
+        raise SystemExit("ready requires a scenario_dir")
+    scen_dir = args[0]
+    cfg = read_config(os.path.join(scen_dir, "config.yaml"))
+    stage = cfg.get("stage", "rtl")
+    if stage != "rtl":
+        raise SystemExit(f"ready: stage={stage!r} unsupported (rtl only for now).")
+
+    orig_root = (cfg.get("oracle") or {}).get("rtl_root") or cfg.get("rtl_root")
+    if not (orig_root and os.path.isdir(orig_root)):
+        raise SystemExit("ready: need oracle.rtl_root pointing at a directory of RTL.")
+    top = (cfg.get("perceiver") or {}).get("top")
+
+    with open(cfg["pack_path"], encoding="utf-8") as f:
+        pack = json.load(f)
+    pack["__path__"] = cfg["pack_path"]
+
+    # Working copy we mutate across rounds; the original is read-only.
+    out_root = os.path.abspath(os.path.join(scen_dir, "ready_out"))
+    if os.path.exists(out_root):
+        shutil.rmtree(out_root)
+    shutil.copytree(orig_root, out_root)
+    rounds_root = os.path.join(out_root, ".cogni_rounds")
+    os.makedirs(rounds_root, exist_ok=True)
+
+    def measure_rtl():
+        """Sweep the WORKING copy with live Verilator: (violations, lint)."""
+        cfg2 = _repoint_cfg(cfg, orig_root, out_root)
+        world = Perceiver(make_adapter(cfg2)).perceive([])
+        reality = make_oracle(cfg2).from_existing()
+        rep = sweep(pack, world, reality, stage_filter=stage)
+        return rep.violations(), lint_counts(gather_rtl_files(out_root), top=top)
+
+    def run_synth():
+        """Synthesize the working copy. (measurements|None, status, note)."""
+        from adapters.synth.yosys import runner as yosys_runner
+        try:
+            yr = yosys_runner.from_rtl(out_root, top=top)
+            return yr.measurements, "ok", ""
+        except FileNotFoundError as e:
+            return None, "unavailable", str(e)
+        except Exception as e:  # synthesis failed (e.g. unsupported SV)
+            return None, "failed", (str(e).splitlines() or ["synthesis error"])[0]
+
+    def apply_fixes(rulechecks, rnd):
+        fixdir = os.path.join(rounds_root, f"round{rnd}")
+        fixes = propose_fixes_sync(rulechecks, fixdir, rtl_root=out_root,
+                                   concurrency=concurrency)
+        n_apply = 0
+        for fx in fixes:
+            if fx.fixed_file and fx.target_file:
+                ok = _write_fixed_file(out_root, fx.target_file, fx.fixed_file)
+            elif fx.patch_unified_diff:
+                ok = _apply_patch(out_root, fx.patch_unified_diff)
+            else:
+                ok = False
+            n_apply += 1 if ok else 0
+        return len(fixes), n_apply
+
+    print("=" * 70)
+    print(f"[ready] RTL -> gate-level readiness (one command): {scen_dir}")
+    print("=" * 70)
+
+    rnd = 0
+    prev_total = None
+    seen_surprise: dict = {}   # measurement_key -> surprise (first occurrence)
+    rtl_blockers, net_blockers, net_status, net_note = [], [], "not_run", ""
+    while True:
+        rtl_v, lints = measure_rtl()
+        rtl_blockers = gate_mod.classify(rtl_v)
+        print(gate_mod.format_readiness(
+            rtl_blockers, lint=lints, title="RTL READINESS (Verilator lint)",
+            round_no=(rnd or None), max_rounds=max_rounds))
+
+        net_blockers, net_checks = [], []
+        if netlist and not rtl_blockers:
+            meas, net_status, net_note = run_synth()
+            if net_status == "ok":
+                net_blockers = gate_mod.netlist_blockers(meas)
+                net_checks = [gate_mod.blocker_to_rulecheck(b) for b in net_blockers]
+                # SURPRISE: RTL gate was clean but synthesis found a hazard the
+                # rulebook didn't predict -> record it once to learn from later.
+                if learn:
+                    from agent.gate_learn import netlist_surprises
+                    for s in netlist_surprises(rtl_blockers, net_blockers):
+                        seen_surprise.setdefault(s["measurement_key"], s)
+                netlint = {k: meas.get(k) for k in
+                           ("synth.total_cells", "synth.warnings.latch",
+                            "synth.warnings.multidriven") if meas.get(k) is not None}
+                print(gate_mod.format_readiness(
+                    net_blockers, lint=netlint,
+                    title="NETLIST GATE (real Yosys synthesis)"))
+            else:
+                print("\n=== NETLIST GATE (real Yosys synthesis) ===")
+                print(f"VERDICT: UNVERIFIED -- synthesis {net_status}: {net_note}")
+
+        blockers = rtl_blockers + net_blockers
+        total = len(blockers)
+        if total == 0:
+            break
+        if not fix or rnd >= max_rounds:
+            break
+        if prev_total is not None and total >= prev_total:
+            print("[ready] no progress this round -- stopping the loop.")
+            break
+        prev_total = total
+        rnd += 1
+        nprop, napp = apply_fixes(rtl_v + net_checks, rnd)
+        print(f"\n[ready] round {rnd}: proposed {nprop} fix(es), applied {napp}")
+
+    # LEARN: mint a rule from each netlist surprise and promote it into the
+    # master pack, so next run's RTL gate anticipates the hazard pre-synthesis.
+    learned = {"learned": 0}
+    if learn and seen_surprise:
+        from agent.gate_learn import learn_from_surprises
+        design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
+        today = datetime.now(timezone.utc).date().isoformat()
+        learned = learn_from_surprises(
+            list(seen_surprise.values()),
+            session_dir=os.path.join(out_root, ".learn"),
+            pack_path=cfg["pack_path"], design=design, today=today)
+        print()
+        print("=== LEARNED (netlist surprises -> master pack) ===")
+        for a in (learned.get("promote") or {}).get("plan", []):
+            print(f"  [{a['decision']:5}] {a['op']:9} {a['rule_id']}  {a['detail']}")
+
+    # Emit cleaned RTL + one .patch per changed file.
+    diffs = synthesize_diffs(orig_root, out_root)
+    patch_dir = os.path.join(out_root, "_patches")
+    if diffs:
+        os.makedirs(patch_dir, exist_ok=True)
+        for rel, d in diffs.items():
+            pf = os.path.join(patch_dir, rel.replace(os.sep, "__") + ".patch")
+            with open(pf, "w", encoding="utf-8") as fh:
+                fh.write(d if d.endswith("\n") else d + "\n")
+
+    # Final combined verdict over BOTH gates.
+    final_blockers = rtl_blockers + net_blockers
+    if not netlist:
+        final = "GO" if not rtl_blockers else "NO-GO"
+    elif net_status == "ok":
+        final = "GO" if not final_blockers else "NO-GO"
+    elif net_status in ("unavailable", "failed"):
+        final = ("GO (RTL clean) / NETLIST UNVERIFIED" if not rtl_blockers else "NO-GO")
+    else:
+        final = "NO-GO"  # netlist never reached (RTL never went clean)
+
+    print()
+    print("=" * 70)
+    print(f"[ready] FINAL VERDICT: {final}   (fix rounds run: {rnd})")
+    print(f"        cleaned RTL : {out_root}")
+    print(f"        patches     : "
+          + (f"{patch_dir}  ({len(diffs)} file(s) changed)" if diffs
+             else "none (RTL unchanged)"))
+    if learn:
+        nlearn = learned.get("learned", 0)
+        promo = (learned.get("promote") or {}).get("summary") or {}
+        print(f"        learned     : {nlearn} netlist surprise(s) -> "
+              f"pack +{promo.get('added', 0)} new, {promo.get('strengthened', 0)} strengthened")
+    if netlist and net_status in ("unavailable", "failed"):
+        print(f"        netlist     : {net_status} -- {net_note}")
+    if final_blockers:
+        print(f"        UNFIXED ({len(final_blockers)}):")
+        for b in final_blockers:
+            print(f"          - [{b.rule_id}] {b.measurement_key}={b.measured} "
+                  f"-> {', '.join(b.downstream_stages) or 'rtl'}")
+    print("=" * 70)
+
+
 def cmd_run_all_api(args: list[str], concurrency: int = 8,
                     with_fixes: bool = False, promote: bool = False,
-                    include_ungradeable: bool = False) -> None:
+                    include_ungradeable: bool = False, verify: bool = False) -> None:
     """End-to-end async runner. Either resume an existing session_dir, or
     start fresh from one or more scenario dirs.
 
@@ -905,14 +1148,21 @@ def cmd_run_all_api(args: list[str], concurrency: int = 8,
         _exec_stage(session_dir, "predict", concurrency)
     )
 
-    # Stage 3: VERIFY — build briefs, then exec
-    cmd_verify(session_dir)
-    stats["verify"] = asyncio.run(
-        _exec_stage(session_dir, "verify", concurrency)
-    )
+    # Stage 3: VERIFY — opt-in via --verify. With a LIVE ORACLE the verdict is
+    # computed from the tool's measurements (see cmd_reflect/make_verdict), not
+    # the LLM panel, so the panel is informational only and OFF by default.
+    # Enable it for no-oracle judgment questions or to scrutinize reasoning.
+    if verify:
+        cmd_verify(session_dir)
+        stats["verify"] = asyncio.run(
+            _exec_stage(session_dir, "verify", concurrency)
+        )
+    else:
+        print("[verify] skipped (pass --verify to run the cross-LLM panel). "
+              "Verdicts come from the oracle.")
 
     # Stage 4: REFLECT — build briefs (also computes verdicts), then exec
-    cmd_reflect(session_dir)
+    cmd_reflect(session_dir, verify=verify)
     stats["reflect"] = asyncio.run(
         _exec_stage(session_dir, "reflect", concurrency)
     )
@@ -992,7 +1242,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "predict", "verify", "verify-api",
                                       "reflect", "finalize", "run-all-api",
-                                      "promote"])
+                                      "promote", "ready"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="Max concurrent API calls per stage (default 8)")
@@ -1017,6 +1267,23 @@ if __name__ == "__main__":
                     help="After predict+learn, run PHASE 3: detect violations, "
                          "propose patches, apply to a COPY, and re-run Verilator "
                          "to confirm. Only the run-all-api command. rtl stage only.")
+    ap.add_argument("--verify", action="store_true",
+                    help="run-all-api: run the cross-LLM verifier panel "
+                         "(verifier 1 + verifier 2). OFF by default — with a "
+                         "live oracle the tool is ground truth and the panel is "
+                         "informational only. Enable it for no-oracle judgment "
+                         "questions or to scrutinize a prediction's reasoning.")
+    ap.add_argument("--max-rounds", type=int, default=3,
+                    help="ready: max auto-fix rounds before giving up (default 3).")
+    ap.add_argument("--no-fix", action="store_true",
+                    help="ready: only emit the GO/NO-GO readiness verdict; do "
+                         "not run the auto-fix loop.")
+    ap.add_argument("--no-netlist", action="store_true",
+                    help="ready: skip the real Yosys synthesis / netlist gate; "
+                         "stop at RTL readiness.")
+    ap.add_argument("--no-learn", action="store_true",
+                    help="ready: do not mint/promote rules from netlist "
+                         "surprises (RTL clean but synthesis found a hazard).")
     ns = ap.parse_args()
     if ns.test_mode and not is_test_mode():
         enable_test_mode()
@@ -1065,8 +1332,13 @@ if __name__ == "__main__":
         #   - existing session_dir (resume)
         #   - one or more scenario dirs (fresh start)
         cmd_run_all_api(ns.args, concurrency=ns.concurrency, with_fixes=ns.with_fixes,
-                        promote=ns.promote, include_ungradeable=ns.include_ungradeable)
+                        promote=ns.promote, include_ungradeable=ns.include_ungradeable,
+                        verify=ns.verify)
     elif ns.cmd == "promote":
         cmd_promote(ns.args[0], pack_path=ns.pack, apply=ns.apply,
                     scenario=ns.scenario,
                     include_ungradeable=ns.include_ungradeable)
+    elif ns.cmd == "ready":
+        cmd_ready(ns.args, max_rounds=ns.max_rounds, fix=not ns.no_fix,
+                  netlist=not ns.no_netlist, learn=not ns.no_learn,
+                  concurrency=ns.concurrency)

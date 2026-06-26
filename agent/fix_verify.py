@@ -17,6 +17,7 @@ touched — everything happens on the copy.
 """
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import shutil
@@ -74,11 +75,17 @@ def _apply_patch(workdir: str, diff_text: str) -> bool:
     patch_path = os.path.join(workdir, "_cogni_fix.patch")
     with open(patch_path, "w", encoding="utf-8") as fh:
         fh.write(diff_text)
+    # Strict applies first, then progressively more forgiving ones: --recount
+    # tolerates wrong @@ line numbers, patch --fuzz tolerates drifted context.
+    # LLM-authored diffs frequently miss exact line numbers, so without these
+    # a perfectly correct edit gets rejected.
     attempts = (
         ["git", "apply", "-p1", "_cogni_fix.patch"],
         ["git", "apply", "-p0", "_cogni_fix.patch"],
-        ["patch", "-p1", "--no-backup-if-mismatch", "-i", "_cogni_fix.patch"],
-        ["patch", "-p0", "--no-backup-if-mismatch", "-i", "_cogni_fix.patch"],
+        ["git", "apply", "--recount", "-p1", "_cogni_fix.patch"],
+        ["git", "apply", "--recount", "-p0", "_cogni_fix.patch"],
+        ["patch", "-p1", "--fuzz=3", "--no-backup-if-mismatch", "-i", "_cogni_fix.patch"],
+        ["patch", "-p0", "--fuzz=3", "--no-backup-if-mismatch", "-i", "_cogni_fix.patch"],
     )
     ok = False
     for cmd in attempts:
@@ -91,6 +98,44 @@ def _apply_patch(workdir: str, diff_text: str) -> bool:
     except OSError:
         pass
     return ok
+
+
+def _write_fixed_file(workdir: str, target_file: str, content: str) -> bool:
+    """Overwrite `target_file` (relative to workdir) with the model's full
+    corrected text. The most reliable application path — no diff matching.
+    Refuses to escape the work tree."""
+    if not target_file or content is None:
+        return False
+    dest = os.path.normpath(os.path.join(workdir, target_file))
+    if os.path.commonpath([os.path.abspath(dest), os.path.abspath(workdir)]) \
+            != os.path.abspath(workdir):
+        return False
+    if not os.path.exists(dest):
+        return False  # only replace files that were actually in the source tree
+    if not content.endswith("\n"):
+        content += "\n"
+    with open(dest, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    return True
+
+
+def synthesize_diffs(original_root: str, work_root: str) -> dict[str, str]:
+    """Unified diff per changed file (original -> patched). Lets us emit a real
+    `.patch` for the operator even when the model returned a whole file."""
+    out: dict[str, str] = {}
+    for wf in gather_rtl_files(work_root):
+        rel = os.path.relpath(wf, work_root)
+        of = os.path.join(original_root, rel)
+        new = open(wf, encoding="utf-8", errors="replace").read().splitlines(keepends=True)
+        old = (open(of, encoding="utf-8", errors="replace").read().splitlines(keepends=True)
+               if os.path.exists(of) else [])
+        if old == new:
+            continue
+        diff = "".join(difflib.unified_diff(
+            old, new, fromfile=f"a/{rel}", tofile=f"b/{rel}"))
+        if diff:
+            out[rel] = diff
+    return out
 
 
 def verify_fixes(patches: list[dict], rtl_root: str, *,
@@ -120,13 +165,21 @@ def verify_fixes(patches: list[dict], rtl_root: str, *,
 
     applied = []
     for p in patches:
-        diff = p.get("patch_unified_diff") or ""
-        ok = _apply_patch(work, diff) if diff else False
-        applied.append({"target_file": p.get("target_file", ""),
+        # Prefer a full corrected file (no diff matching); fall back to the
+        # unified diff with forgiving apply modes.
+        fixed = p.get("fixed_file") or ""
+        tf = p.get("target_file") or ""
+        if fixed.strip() and tf:
+            ok = _write_fixed_file(work, tf, fixed)
+        else:
+            diff = p.get("patch_unified_diff") or ""
+            ok = _apply_patch(work, diff) if diff else False
+        applied.append({"target_file": tf,
                         "rule_id": p.get("rule_id", ""), "applied": ok})
 
     after = lint_counts(gather_rtl_files(work), top=top,
                         verilator_bin=verilator_bin, extra_args=extra_args)
+    patch_diffs = synthesize_diffs(rtl_root, work)
 
     classes = set(before) | set(after)
     delta = {c: after.get(c, 0) - before.get(c, 0) for c in classes
@@ -141,6 +194,7 @@ def verify_fixes(patches: list[dict], rtl_root: str, *,
         "total_before": total_before, "total_after": total_after,
         "resolved": bool(any_applied and total_after < total_before and no_new),
         "tmp_dir": work,
+        "patch_diffs": patch_diffs,   # {rel_path: unified_diff} of what changed
     }
 
 

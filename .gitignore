@@ -25,3 +25,6 @@ scenarios/*/llm_calls/
 
 # promote-step pack backups (transient)
 packs/**/*.json.bak
+
+# ready-gate working output (cleaned RTL copy, round artifacts)
+scenarios/**/ready_out/

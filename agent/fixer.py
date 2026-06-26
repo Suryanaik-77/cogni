@@ -60,6 +60,7 @@ class FixProposal:
     expected: Any
     target_file: str
     patch_unified_diff: str
+    fixed_file: str
     rationale: str
     confidence: str       # likely | uncertain | unlikely
     verifier_opinions: list[VerifierOpinion] = field(default_factory=list)
@@ -75,9 +76,16 @@ class FixProposal:
 PROPOSE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["target_file", "patch_unified_diff", "rationale", "confidence"],
+    # Only the rationale + confidence are universally required. The patch
+    # PAYLOAD can be EITHER a full corrected file (`fixed_file`, most reliable —
+    # no line-number/context matching) OR a `patch_unified_diff`; `target_file`
+    # is optional because it's derivable from the diff header or a single-file
+    # context. Requiring all four made weak models fail the whole call when
+    # they emitted a diff but omitted the redundant target_file field.
+    "required": ["rationale", "confidence"],
     "properties": {
         "target_file":         {"type": "string"},
+        "fixed_file":          {"type": "string"},
         "patch_unified_diff":  {"type": "string"},
         "rationale":           {"type": "string"},
         "confidence":          {"type": "string", "enum": ["likely", "uncertain", "unlikely", "high", "medium", "low"]},
@@ -128,6 +136,33 @@ def _slug(text: str) -> str:
     return s[:60] or "x"
 
 
+_DIFF_TARGET_RE = re.compile(r"^\+\+\+\s+(?:b/)?(\S+)", re.MULTILINE)
+
+
+def _has_payload(prop: dict) -> bool:
+    """A proposal carries a real fix if it has a full file or a diff and is
+    not an explicit refusal."""
+    if (prop.get("decision") or "").lower() == "refuse":
+        return False
+    return bool((prop.get("fixed_file") or "").strip()
+                or (prop.get("patch_unified_diff") or "").strip())
+
+
+def _derive_target_file(prop: dict, source_files: dict[str, str]) -> str:
+    """Best-effort target path: explicit field -> diff `+++ b/<path>` header ->
+    the sole source file. Keeps weak models from failing just because they
+    omitted the (redundant) target_file."""
+    tf = (prop.get("target_file") or "").strip()
+    if tf:
+        return tf
+    m = _DIFF_TARGET_RE.search(prop.get("patch_unified_diff") or "")
+    if m and m.group(1) not in ("/dev/null",):
+        return m.group(1)
+    if len(source_files) == 1:
+        return next(iter(source_files))
+    return ""
+
+
 def _rule_view(rc: RuleCheck) -> dict:
     return {
         "id":        rc.rule_id,
@@ -151,10 +186,20 @@ A deterministic sweep found that the user's design violates a rule from
 the knowledge pack. Your job is to propose a minimal, surgical patch to
 the source that resolves the violation, plus a one-paragraph rationale.
 
+## How to return the fix
+
+PREFER returning the **whole corrected file** in `fixed_file` — the full text
+of the one file after your edit. It is the most reliable form: no line numbers
+or context to drift. Set `target_file` to that file's path (a key in
+`source_files`). Only change what the rule requires; keep everything else
+byte-for-byte.
+
+If you'd rather, you may instead return a `patch_unified_diff` (the kind
+`patch -p1` accepts) whose `+++ b/<path>` header names `target_file`. Use one
+file per fix unless the violation truly spans multiple files.
+
 ## Discipline
 
-- Output a unified diff (the kind `patch -p1` accepts). One file per patch
-  unless the violation truly spans multiple files.
 - Do not rewrite or refactor unrelated code. Smallest change that satisfies
   the rule is best.
 - If the rule's `examples.compliant` is present, prefer the pattern shown
@@ -180,7 +225,7 @@ Read `inputs.json`. It contains:
 ## Output
 
 Return JSON matching the schema. `target_file` must be one of the keys in
-`source_files`. The diff's `---` / `+++` lines must use that same path.
+`source_files`. If you use a diff, its `---` / `+++` lines must use that path.
 """
     inputs = {
         "rule": _rule_view(rc),
@@ -382,7 +427,7 @@ async def propose_fixes(violations: list[RuleCheck],
     all_verify_calls: list[LLMCall] = []
     verify_index: list[tuple[int, str]] = []   # (violation_idx, "gpt"/"gemini")
     for i, (rc, prop) in enumerate(zip(violations, proposals)):
-        if prop.get("decision") == "refuse" or not prop.get("patch_unified_diff"):
+        if not _has_payload(prop):
             continue
         vcs = _verifier_calls(rc, prop, source_files)
         for vc in vcs:
@@ -418,7 +463,7 @@ async def propose_fixes(violations: list[RuleCheck],
     final_proposals = [revised[i] or proposals[i] for i in range(len(violations))]
     reflect_calls: list[LLMCall | None] = [None] * len(violations)
     for i, fp in enumerate(final_proposals):
-        if fp.get("patch_unified_diff"):
+        if _has_payload(fp):
             reflect_calls[i] = _reflect_call(violations[i], fp,
                                               per_violation_verifiers[i])
     reflect_briefs = [_write_brief(c, run_dir) for c in reflect_calls if c]
@@ -450,8 +495,9 @@ async def propose_fixes(violations: list[RuleCheck],
             measurement_key=first.measurement_key if first else "",
             measured=first.measured if first else None,
             expected=first.expected if first else None,
-            target_file=fp.get("target_file", ""),
+            target_file=_derive_target_file(fp, source_files),
             patch_unified_diff=fp.get("patch_unified_diff", ""),
+            fixed_file=fp.get("fixed_file", ""),
             rationale=fp.get("rationale", ""),
             confidence=fp.get("confidence", "unlikely"),
             verifier_opinions=v_opinions,

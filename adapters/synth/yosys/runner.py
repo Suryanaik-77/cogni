@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -115,6 +116,74 @@ def from_netlist(netlist_path: str,
 
     return YosysReality(measurements=m, source="yosys",
                         artifacts=[stat_path, log_path])
+
+
+def _gather_rtl(rtl_dir: str) -> list[str]:
+    out = []
+    for dp, _d, fs in os.walk(rtl_dir):
+        for f in sorted(fs):
+            if f.endswith((".sv", ".v")):
+                out.append(os.path.join(dp, f))
+    return sorted(out)
+
+
+def from_rtl(rtl_dir: str, *, top: str | None = None,
+             timeout_s: int = 300) -> YosysReality:
+    """Actually SYNTHESIZE the RTL with Yosys (RTL -> generic gate netlist) and
+    measure the result. This is the real gate-level step: it proves the RTL
+    synthesizes AND surfaces hazards that only appear in the netlist —
+    inferred latch CELLS ($_DLATCH_*) and multidriven nets — which RTL lint
+    can miss.
+
+    Raises FileNotFoundError if yosys isn't installed or there's no RTL, and
+    RuntimeError if synthesis fails (e.g. unsupported SV) — the caller turns
+    those into an honest 'netlist UNVERIFIED', never a false GO.
+    """
+    if shutil.which("yosys") is None:
+        raise FileNotFoundError("yosys not on PATH")
+    files = _gather_rtl(rtl_dir)
+    if not files:
+        raise FileNotFoundError(f"no .sv/.v under {rtl_dir}")
+
+    work = tempfile.mkdtemp(prefix="cogni_synth_")
+    stat_path = os.path.join(work, "stat.rpt")
+    log_path = os.path.join(work, "yosys.log")
+    synth_cmd = f"synth -top {top}" if top else "synth -auto-top"
+    script = (
+        "read_verilog -sv " + " ".join(files) + "\n"
+        + synth_cmd + "\n"
+        + f"tee -o {stat_path} stat\n"
+    )
+    script_path = os.path.join(work, "run.ys")
+    with open(script_path, "w") as f:
+        f.write(script)
+    with open(log_path, "w") as lf:
+        proc = subprocess.run(["yosys", "-q", "-s", script_path],
+                              stdout=lf, stderr=subprocess.STDOUT, timeout=timeout_s)
+    log = open(log_path, encoding="utf-8", errors="replace").read()
+    if proc.returncode != 0 or not os.path.exists(stat_path):
+        tail = "\n".join(log.splitlines()[-12:])
+        raise RuntimeError(f"yosys synthesis failed (rc={proc.returncode}).\n{tail}")
+
+    stats = parse_stat_rpt(stat_path)
+    total_cells = stats["total_cells"] or 0
+    total_ff = stats["total_ff"] or 0
+    gate_counts = stats["gate_counts"] or {}
+    latch_cells = sum(c for g, c in gate_counts.items() if "LATCH" in g.upper())
+    m: dict[str, Any] = {
+        "synth.total_cells": stats["total_cells"],
+        "synth.total_ff": stats["total_ff"],
+        "synth.total_comb": stats["total_comb"],
+        "synth.gate_counts": gate_counts,
+        # Hazards that only show up in the NETLIST:
+        "synth.warnings.latch": int(latch_cells),
+        "synth.warnings.multidriven":
+            len(re.findall(r"multiple drivers|multidriven", log, re.I)),
+    }
+    if total_cells and total_ff:
+        m["synth.ff_share_pct"] = round(100.0 * total_ff / total_cells, 2)
+    return YosysReality(measurements=m, source="yosys-rtl",
+                        raw_log=log, artifacts=[stat_path, log_path])
 
 
 def observe(*,

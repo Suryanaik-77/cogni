@@ -2882,7 +2882,7 @@
       "version": 1,
       "statement": "Verilator does not report inferred latches (rtl.lint.latch.count) on signals with incomplete assignment within case statements over enums when all enum values are enumerated, even though the design exhibits latch-prone incomplete assignment patterns.",
       "kind": "tendency",
-      "strength": "strong",
+      "strength": "high",
       "status": "active",
       "applies_to": {
         "stage": [
@@ -2946,6 +2946,12 @@
           "at": "2026-06-24",
           "from_session": "20260624_080732",
           "rationale": "Prediction was right with correct reasoning; empirical confirmation on spi_master.sv validates the tool-coverage gap claim. Verilator's behavior on enum-complete case statements with incomplete assignments is now confirmed and warrants elevated confidence."
+        },
+        {
+          "event": "strengthen",
+          "at": "2026-06-26",
+          "from_session": "20260626_051550",
+          "rationale": "Prediction was right with correct reasoning; empirical confirmation on spi_master.sv validates the tool-coverage gap claim. Verilator's behavior on enum-complete case statements with incomplete assignments is now confirmed with high-confidence measurement (rtl.lint.latch.count = 0 exactly as predicted)."
         }
       ],
       "examples": {}
@@ -2955,7 +2961,7 @@
       "version": 1,
       "statement": "Verilator does not report CASEINCOMPLETE warnings for always_comb case statements that lack a default branch and leave signals unassigned on some paths; the tool's latch detection may also not flag the resulting inferred latches in all cases.",
       "kind": "tendency",
-      "strength": "strong",
+      "strength": "high",
       "status": "active",
       "applies_to": {
         "stage": [
@@ -3027,6 +3033,12 @@
           "at": "2026-06-24",
           "from_session": "20260624_080732",
           "rationale": "Prediction was right with correct reasoning; empirical confirmation on spi_master.sv validates both the case_incomplete and latch detection gaps. The dual-measurement prediction (both counts = 0) held exactly as stated."
+        },
+        {
+          "event": "strengthen",
+          "at": "2026-06-26",
+          "from_session": "20260626_051550",
+          "rationale": "Prediction was right with correct reasoning; empirical confirmation on spi_master.sv validates both the case_incomplete and latch detection gaps. The dual-measurement prediction (both counts = 0) held exactly as stated with high-confidence intervals."
         }
       ],
       "examples": {}

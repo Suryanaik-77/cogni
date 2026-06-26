@@ -118,6 +118,12 @@ def from_netlist(netlist_path: str,
                         artifacts=[stat_path, log_path])
 
 
+def _yosys_bin() -> str:
+    """The yosys executable to invoke. Override with COGNI_YOSYS_BIN (e.g.
+    'yowasp-yosys' for the pip/WASM build) when a plain `yosys` isn't on PATH."""
+    return os.environ.get("COGNI_YOSYS_BIN", "yosys")
+
+
 def _gather_rtl(rtl_dir: str) -> list[str]:
     out = []
     for dp, _d, fs in os.walk(rtl_dir):
@@ -139,29 +145,60 @@ def from_rtl(rtl_dir: str, *, top: str | None = None,
     RuntimeError if synthesis fails (e.g. unsupported SV) — the caller turns
     those into an honest 'netlist UNVERIFIED', never a false GO.
     """
-    if shutil.which("yosys") is None:
-        raise FileNotFoundError("yosys not on PATH")
+    ybin = _yosys_bin()
+    if shutil.which(ybin) is None:
+        raise FileNotFoundError(f"yosys not on PATH (looked for {ybin!r}; set "
+                                "COGNI_YOSYS_BIN to override)")
     files = _gather_rtl(rtl_dir)
     if not files:
         raise FileNotFoundError(f"no .sv/.v under {rtl_dir}")
 
     work = tempfile.mkdtemp(prefix="cogni_synth_")
+    # Run everything RELATIVE to `work` with cwd=work: the WASM yosys
+    # (yowasp-yosys) is sandboxed and can only read its working directory, so
+    # absolute /tmp paths fail. Copy the RTL in under unique basenames and refer
+    # to all files by relative name -- works for native yosys too.
+    local_files = []
+    for i, f in enumerate(files):
+        dest = os.path.basename(f)
+        if dest in local_files:
+            dest = f"{i}_{dest}"
+        shutil.copy2(f, os.path.join(work, dest))
+        local_files.append(dest)
     stat_path = os.path.join(work, "stat.rpt")
     log_path = os.path.join(work, "yosys.log")
     synth_cmd = f"synth -top {top}" if top else "synth -auto-top"
     script = (
-        "read_verilog -sv " + " ".join(files) + "\n"
+        "read_verilog -sv " + " ".join(local_files) + "\n"
         + synth_cmd + "\n"
-        + f"tee -o {stat_path} stat\n"
+        + "tee -o stat.rpt stat\n"
     )
-    script_path = os.path.join(work, "run.ys")
-    with open(script_path, "w") as f:
+    with open(os.path.join(work, "run.ys"), "w") as f:
         f.write(script)
     with open(log_path, "w") as lf:
-        proc = subprocess.run(["yosys", "-q", "-s", script_path],
+        proc = subprocess.run([ybin, "-q", "-s", "run.ys"], cwd=work,
                               stdout=lf, stderr=subprocess.STDOUT, timeout=timeout_s)
     log = open(log_path, encoding="utf-8", errors="replace").read()
+    # A latch inferred in an always_comb process makes yosys ABORT (rc=1) rather
+    # than emit a cell -- but that abort IS the gate-level hazard we're gating
+    # on (and the one Verilator often misses). Treat it as a measured latch, not
+    # an opaque failure. Distinct signal names = latch count.
+    latch_signals = set(re.findall(
+        r"Latch inferred for signal [`']([^'\s]+)'", log))
+    multidriven = len(re.findall(r"multiple drivers|multidriven", log, re.I))
+
     if proc.returncode != 0 or not os.path.exists(stat_path):
+        if latch_signals:
+            return YosysReality(
+                measurements={
+                    "synth.warnings.latch": len(latch_signals),
+                    "synth.warnings.multidriven": multidriven,
+                    "synth.total_cells": None, "synth.total_ff": None,
+                    "synth.total_comb": None, "synth.gate_counts": {},
+                    "synth.note": "synth aborted on inferred latch in always_comb "
+                                  f"({', '.join(sorted(latch_signals))})",
+                },
+                source="yosys-rtl", raw_log=log, artifacts=[log_path])
         tail = "\n".join(log.splitlines()[-12:])
         raise RuntimeError(f"yosys synthesis failed (rc={proc.returncode}).\n{tail}")
 
@@ -175,10 +212,10 @@ def from_rtl(rtl_dir: str, *, top: str | None = None,
         "synth.total_ff": stats["total_ff"],
         "synth.total_comb": stats["total_comb"],
         "synth.gate_counts": gate_counts,
-        # Hazards that only show up in the NETLIST:
-        "synth.warnings.latch": int(latch_cells),
-        "synth.warnings.multidriven":
-            len(re.findall(r"multiple drivers|multidriven", log, re.I)),
+        # Hazards that only show up in the NETLIST (max of netlist cells and any
+        # always_comb latch the log flagged):
+        "synth.warnings.latch": max(int(latch_cells), len(latch_signals)),
+        "synth.warnings.multidriven": multidriven,
     }
     if total_cells and total_ff:
         m["synth.ff_share_pct"] = round(100.0 * total_ff / total_cells, 2)

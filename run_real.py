@@ -903,21 +903,25 @@ def _repoint_cfg(cfg: dict, orig_root: str, new_root: str) -> dict:
     return c
 
 
-def cmd_ready(args: list[str], *, max_rounds: int = 3, fix: bool = True,
-              netlist: bool = True, learn: bool = True, concurrency: int = 4) -> None:
-    """RTL -> gate-level readiness gate, with the REAL netlist step.
+def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
+              fix: bool = True, netlist: bool = True, learn: bool = True,
+              concurrency: int = 4) -> None:
+    """RTL -> gate-level readiness gate, with the REAL netlist step + learning.
 
-    One command, the whole loop:
+    One command, the whole loop. INNER loop (one pass):
       1. RTL gate   : sweep the RTL (live Verilator) -> GO/NO-GO, grouped by the
                       downstream stage each violation would break.
       2. fix        : (unless --no-fix) propose a fix per blocker, apply to a
-                      WORKING COPY, re-measure. Repeat until RTL is clean.
+                      WORKING COPY, re-measure. Repeat until RTL is clean,
+                      stops progressing, or hits --max-rounds.
       3. NETLIST gate: once RTL is clean, actually SYNTHESIZE with Yosys and
                       check the real netlist for hazards that only appear in
-                      gates (inferred latch cells, multidriven nets). Any found
-                      are fed back as blockers and fixed in RTL.
-      4. repeat until the design passes BOTH gates, stops progressing, or hits
-         --max-rounds.
+                      gates (inferred latch cells, multidriven nets).
+
+    OUTER loop (--max-passes): after each pass, LEARN+promote the netlist
+    surprises into the master pack, then RE-RUN the whole inner loop with the
+    updated rulebook -- repeating until the design comes out clean OR it can no
+    longer improve (a pass that applies no fix and learns nothing == fixpoint).
 
     The original source is never touched; cleaned RTL + one `.patch` per changed
     file land under <scenario>/ready_out/. If Yosys isn't installed the netlist
@@ -974,8 +978,8 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, fix: bool = True,
         except Exception as e:  # synthesis failed (e.g. unsupported SV)
             return None, "failed", (str(e).splitlines() or ["synthesis error"])[0]
 
-    def apply_fixes(rulechecks, rnd):
-        fixdir = os.path.join(rounds_root, f"round{rnd}")
+    def apply_fixes(rulechecks, label):
+        fixdir = os.path.join(rounds_root, f"round_{label}")
         fixes = propose_fixes_sync(rulechecks, fixdir, rtl_root=out_root,
                                    concurrency=concurrency)
         n_apply = 0
@@ -989,72 +993,123 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, fix: bool = True,
             n_apply += 1 if ok else 0
         return len(fixes), n_apply
 
+    def run_pass(pass_no):
+        """One full inner loop: fix RTL + netlist blockers until the design is
+        clean, stops progressing, or hits --max-rounds. Returns the end-state."""
+        rnd = 0
+        prev_keys = None
+        surprises: dict = {}
+        rtl_b, net_b, net_st, net_nt = [], [], "not_run", ""
+        fixes_applied = 0
+        while True:
+            rtl_v, lints = measure_rtl()
+            rtl_b = gate_mod.classify(rtl_v)
+            print(gate_mod.format_readiness(
+                rtl_b, lint=lints, title=f"RTL READINESS (pass {pass_no})",
+                round_no=(rnd or None), max_rounds=max_rounds))
+
+            net_b, net_checks = [], []
+            if netlist and not rtl_b:
+                meas, net_st, net_nt = run_synth()
+                if net_st == "ok":
+                    net_b = gate_mod.netlist_blockers(meas)
+                    net_checks = [gate_mod.blocker_to_rulecheck(b) for b in net_b]
+                    # SURPRISE: RTL clean but synthesis found a hazard the
+                    # rulebook didn't predict -> record once to learn from.
+                    if learn:
+                        from agent.gate_learn import netlist_surprises
+                        for s in netlist_surprises(rtl_b, net_b):
+                            surprises.setdefault(s["measurement_key"], s)
+                    netlint = {k: meas.get(k) for k in
+                               ("synth.total_cells", "synth.warnings.latch",
+                                "synth.warnings.multidriven") if meas.get(k) is not None}
+                    print(gate_mod.format_readiness(
+                        net_b, lint=netlint,
+                        title="NETLIST GATE (real Yosys synthesis)"))
+                else:
+                    print("\n=== NETLIST GATE (real Yosys synthesis) ===")
+                    print(f"VERDICT: UNVERIFIED -- synthesis {net_st}: {net_nt}")
+
+            cur = rtl_b + net_b
+            if not cur:
+                break
+            if not fix or rnd >= max_rounds:
+                break
+            # Progress is measured by WHICH blockers remain, not how many: a
+            # round that swaps one blocker for another (e.g. blkseq -> a latch
+            # the netlist surfaced) is real progress. Stop only when no blocker
+            # from last round was eliminated.
+            keys = frozenset((b.rule_id, b.measurement_key) for b in cur)
+            if prev_keys is not None and keys >= prev_keys:
+                print("[ready] no progress this round (same blockers persist) "
+                      "-- ending inner loop.")
+                break
+            prev_keys = keys
+            rnd += 1
+            nprop, napp = apply_fixes(rtl_v + net_checks, f"p{pass_no}r{rnd}")
+            fixes_applied += napp
+            print(f"\n[ready] pass {pass_no} round {rnd}: proposed {nprop} "
+                  f"fix(es), applied {napp}")
+        return {"rtl": rtl_b, "net": net_b, "net_status": net_st,
+                "net_note": net_nt, "surprises": surprises,
+                "fixes_applied": fixes_applied}
+
     print("=" * 70)
     print(f"[ready] RTL -> gate-level readiness (one command): {scen_dir}")
     print("=" * 70)
 
-    rnd = 0
-    prev_total = None
-    seen_surprise: dict = {}   # measurement_key -> surprise (first occurrence)
+    # OUTER LOOP: run the inner loop, learn+promote its netlist surprises, then
+    # RE-RUN with the updated rulebook -- repeating until the design comes out
+    # clean OR it can no longer improve (a pass that applies no fix AND learns
+    # nothing new == fixpoint; running again would only repeat itself).
+    design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
+    pass_no = 0
+    total_learned = 0
+    promo = {"added": 0, "strengthened": 0}
     rtl_blockers, net_blockers, net_status, net_note = [], [], "not_run", ""
     while True:
-        rtl_v, lints = measure_rtl()
-        rtl_blockers = gate_mod.classify(rtl_v)
-        print(gate_mod.format_readiness(
-            rtl_blockers, lint=lints, title="RTL READINESS (Verilator lint)",
-            round_no=(rnd or None), max_rounds=max_rounds))
+        pass_no += 1
+        # Reload the master pack so rules promoted on the previous pass are live.
+        with open(cfg["pack_path"], encoding="utf-8") as f:
+            pack = json.load(f)
+        pack["__path__"] = cfg["pack_path"]
+        print(f"\n########## PASS {pass_no}/{max_passes} ##########")
 
-        net_blockers, net_checks = [], []
-        if netlist and not rtl_blockers:
-            meas, net_status, net_note = run_synth()
-            if net_status == "ok":
-                net_blockers = gate_mod.netlist_blockers(meas)
-                net_checks = [gate_mod.blocker_to_rulecheck(b) for b in net_blockers]
-                # SURPRISE: RTL gate was clean but synthesis found a hazard the
-                # rulebook didn't predict -> record it once to learn from later.
-                if learn:
-                    from agent.gate_learn import netlist_surprises
-                    for s in netlist_surprises(rtl_blockers, net_blockers):
-                        seen_surprise.setdefault(s["measurement_key"], s)
-                netlint = {k: meas.get(k) for k in
-                           ("synth.total_cells", "synth.warnings.latch",
-                            "synth.warnings.multidriven") if meas.get(k) is not None}
-                print(gate_mod.format_readiness(
-                    net_blockers, lint=netlint,
-                    title="NETLIST GATE (real Yosys synthesis)"))
-            else:
-                print("\n=== NETLIST GATE (real Yosys synthesis) ===")
-                print(f"VERDICT: UNVERIFIED -- synthesis {net_status}: {net_note}")
+        res = run_pass(pass_no)
+        rtl_blockers, net_blockers = res["rtl"], res["net"]
+        net_status, net_note = res["net_status"], res["net_note"]
+        clean = (not rtl_blockers) and (
+            (not netlist) or (net_status == "ok" and not net_blockers))
 
-        blockers = rtl_blockers + net_blockers
-        total = len(blockers)
-        if total == 0:
-            break
-        if not fix or rnd >= max_rounds:
-            break
-        if prev_total is not None and total >= prev_total:
-            print("[ready] no progress this round -- stopping the loop.")
-            break
-        prev_total = total
-        rnd += 1
-        nprop, napp = apply_fixes(rtl_v + net_checks, rnd)
-        print(f"\n[ready] round {rnd}: proposed {nprop} fix(es), applied {napp}")
+        # Learn + promote this pass's surprises into the master pack.
+        pass_learned = 0
+        if learn and res["surprises"]:
+            from agent.gate_learn import learn_from_surprises
+            today = datetime.now(timezone.utc).date().isoformat()
+            lr = learn_from_surprises(
+                list(res["surprises"].values()),
+                session_dir=os.path.join(out_root, ".learn"),
+                pack_path=cfg["pack_path"], design=design, today=today)
+            pass_learned = lr.get("learned", 0)
+            total_learned += pass_learned
+            s = (lr.get("promote") or {}).get("summary") or {}
+            promo["added"] += s.get("added", 0)
+            promo["strengthened"] += s.get("strengthened", 0)
+            print(f"\n=== LEARNED pass {pass_no} (netlist surprises -> master pack) ===")
+            for a in (lr.get("promote") or {}).get("plan", []):
+                print(f"  [{a['decision']:5}] {a['op']:9} {a['rule_id']}  {a['detail']}")
 
-    # LEARN: mint a rule from each netlist surprise and promote it into the
-    # master pack, so next run's RTL gate anticipates the hazard pre-synthesis.
-    learned = {"learned": 0}
-    if learn and seen_surprise:
-        from agent.gate_learn import learn_from_surprises
-        design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
-        today = datetime.now(timezone.utc).date().isoformat()
-        learned = learn_from_surprises(
-            list(seen_surprise.values()),
-            session_dir=os.path.join(out_root, ".learn"),
-            pack_path=cfg["pack_path"], design=design, today=today)
-        print()
-        print("=== LEARNED (netlist surprises -> master pack) ===")
-        for a in (learned.get("promote") or {}).get("plan", []):
-            print(f"  [{a['decision']:5}] {a['op']:9} {a['rule_id']}  {a['detail']}")
+        if clean:
+            print(f"\n[ready] design CLEAN after pass {pass_no} -- done.")
+            break
+        if pass_no >= max_passes:
+            print(f"\n[ready] reached --max-passes ({max_passes}) -- stopping.")
+            break
+        if res["fixes_applied"] == 0 and pass_learned == 0:
+            print("\n[ready] no fix applied and nothing new learned -- fixpoint "
+                  "reached, can't get cleaner. Stopping.")
+            break
+        print("\n[ready] re-running the loop with the updated rulebook...")
 
     # Emit cleaned RTL + one .patch per changed file.
     diffs = synthesize_diffs(orig_root, out_root)
@@ -1079,16 +1134,14 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, fix: bool = True,
 
     print()
     print("=" * 70)
-    print(f"[ready] FINAL VERDICT: {final}   (fix rounds run: {rnd})")
+    print(f"[ready] FINAL VERDICT: {final}   (passes run: {pass_no})")
     print(f"        cleaned RTL : {out_root}")
     print(f"        patches     : "
           + (f"{patch_dir}  ({len(diffs)} file(s) changed)" if diffs
              else "none (RTL unchanged)"))
     if learn:
-        nlearn = learned.get("learned", 0)
-        promo = (learned.get("promote") or {}).get("summary") or {}
-        print(f"        learned     : {nlearn} netlist surprise(s) -> "
-              f"pack +{promo.get('added', 0)} new, {promo.get('strengthened', 0)} strengthened")
+        print(f"        learned     : {total_learned} netlist surprise(s) -> "
+              f"pack +{promo['added']} new, {promo['strengthened']} strengthened")
     if netlist and net_status in ("unavailable", "failed"):
         print(f"        netlist     : {net_status} -- {net_note}")
     if final_blockers:
@@ -1274,7 +1327,11 @@ if __name__ == "__main__":
                          "informational only. Enable it for no-oracle judgment "
                          "questions or to scrutinize a prediction's reasoning.")
     ap.add_argument("--max-rounds", type=int, default=3,
-                    help="ready: max auto-fix rounds before giving up (default 3).")
+                    help="ready: max auto-fix rounds within one pass (default 3).")
+    ap.add_argument("--max-passes", type=int, default=3,
+                    help="ready: max outer passes -- after each pass it learns + "
+                         "promotes, then re-runs the loop until clean or fixpoint "
+                         "(default 3).")
     ap.add_argument("--no-fix", action="store_true",
                     help="ready: only emit the GO/NO-GO readiness verdict; do "
                          "not run the auto-fix loop.")
@@ -1298,14 +1355,25 @@ if __name__ == "__main__":
         from agent.llm.transports import (
             _BEDROCK_PREDICT_MODEL, _BEDROCK_VERIFY1_MODEL, _BEDROCK_VERIFY2_MODEL,
         )
+        # Only the predict/reflect role always runs. The verifier panel runs
+        # ONLY for the explicit verify commands or run-all-api --verify; `ready`
+        # never uses it. Don't advertise verifier 1/2 when they won't fire.
+        verifiers_active = (
+            ns.cmd in ("verify", "verify-api")
+            or (ns.cmd == "run-all-api" and getattr(ns, "verify", False))
+        )
+        region = (os.environ.get("AWS_REGION")
+                  or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
         print("=" * 70)
-        print("  COGNI_BEDROCK active  --  all roles on AWS Bedrock "
-              f"(region={os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION') or 'us-east-1'}):")
+        print(f"  COGNI_BEDROCK active  --  AWS Bedrock (region={region}):")
         print(f"     predictor/reflector : {_BEDROCK_PREDICT_MODEL}")
-        print(f"     verifier 1          : {_BEDROCK_VERIFY1_MODEL}")
-        print(f"     verifier 2          : {_BEDROCK_VERIFY2_MODEL}")
-        print("  Data stays in your AWS account. Override ids via "
-              "COGNI_BEDROCK_{PREDICT,VERIFY1,VERIFY2}_MODEL.")
+        if verifiers_active:
+            print(f"     verifier 1          : {_BEDROCK_VERIFY1_MODEL}")
+            print(f"     verifier 2          : {_BEDROCK_VERIFY2_MODEL}")
+        else:
+            print("     verifiers           : OFF (no verifier 1/2 calls this run)")
+        print("  Data stays in your AWS account. Override the predictor via "
+              "COGNI_BEDROCK_PREDICT_MODEL.")
         print("=" * 70)
     elif is_test_mode():
         # Banner so the run is unmistakable in logs.
@@ -1339,6 +1407,6 @@ if __name__ == "__main__":
                     scenario=ns.scenario,
                     include_ungradeable=ns.include_ungradeable)
     elif ns.cmd == "ready":
-        cmd_ready(ns.args, max_rounds=ns.max_rounds, fix=not ns.no_fix,
-                  netlist=not ns.no_netlist, learn=not ns.no_learn,
-                  concurrency=ns.concurrency)
+        cmd_ready(ns.args, max_rounds=ns.max_rounds, max_passes=ns.max_passes,
+                  fix=not ns.no_fix, netlist=not ns.no_netlist,
+                  learn=not ns.no_learn, concurrency=ns.concurrency)

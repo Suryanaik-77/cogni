@@ -3042,6 +3042,69 @@
         }
       ],
       "examples": {}
+    },
+    {
+      "id": "r_rtl_synth_latch_gap_when_verilator_clean",
+      "version": 1,
+      "statement": "A clean Verilator lint (rtl.lint.latch.count=0) does NOT guarantee a latch-free netlist: Yosys synthesis inferred 1 latch cell(s) on RTL that Verilator linted clean (first seen on 'buggy_demo'). Treat a clean RTL lint as necessary-but-not-sufficient and confirm latch at synthesis.",
+      "kind": "tendency",
+      "strength": "medium",
+      "status": "active",
+      "applies_to": {
+        "stage": [
+          "rtl"
+        ],
+        "tools": [],
+        "pdks": [],
+        "design_class": [
+          "any"
+        ],
+        "code_origin": [
+          "any"
+        ]
+      },
+      "when": [
+        {
+          "op": "tag",
+          "name": "rtl_stage"
+        },
+        {
+          "op": "tag",
+          "name": "tool_verilator"
+        }
+      ],
+      "unless": [],
+      "predicts": [
+        {
+          "measurement_key": "synth.warnings.latch",
+          "channel": "intervals",
+          "value": {
+            "min": 1,
+            "max": 1
+          },
+          "horizon": "synth"
+        }
+      ],
+      "prevents": [
+        {
+          "downstream_stage": "gate",
+          "downstream_key": "synth.warnings.latch",
+          "mechanism": "latch inferred at synthesis despite a clean RTL lint"
+        }
+      ],
+      "rationale": "Learned from a netlist-gate surprise in `ready`: the RTL gate passed but real Yosys synthesis produced the hazard.",
+      "citations": [],
+      "authored_by": "promoted:.learn",
+      "authored_at": "2026-06-26",
+      "history": [
+        {
+          "event": "promoted",
+          "at": "2026-06-26",
+          "from_session": ".learn",
+          "rationale": "Learned from a netlist-gate surprise in `ready`: the RTL gate passed but real Yosys synthesis produced the hazard."
+        }
+      ],
+      "examples": {}
     }
   ]
 }

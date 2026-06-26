@@ -405,10 +405,15 @@ async def propose_fixes(violations: list[RuleCheck],
                         rtl_root: str | None = None,
                         netlist_path: str | None = None,
                         concurrency: int = 4,
+                        verify: bool = False,
                         on_progress=None) -> list[FixProposal]:
-    """Run the predict → verify → (revise) → reflect cognition chain over
-    every violation. Returns one FixProposal per violation. Refused
-    proposals are returned with empty patch and confidence=unlikely.
+    """Run the propose → (verify → revise) → reflect cognition chain over every
+    violation. Returns one FixProposal per violation.
+
+    `verify` (default False) controls the cross-LLM patch panel (verifier 1 +
+    verifier 2). It is OFF by default: the real check on a patch is re-running
+    the tool (Verilator/Yosys) on the patched copy, so the LLM panel is
+    redundant. Enable it only when you want a second opinion before applying.
     """
     os.makedirs(run_dir, exist_ok=True)
     source_files = _gather_source(rtl_root, netlist_path)
@@ -423,41 +428,41 @@ async def propose_fixes(violations: list[RuleCheck],
     await run_briefs_concurrently(propose_briefs, concurrency=concurrency)
     proposals = [_read_output(c, run_dir) or {} for c in propose_calls]
 
-    # ---- Stage 2: verify, panel × violations, all in parallel ----
-    all_verify_calls: list[LLMCall] = []
-    verify_index: list[tuple[int, str]] = []   # (violation_idx, "gpt"/"gemini")
-    for i, (rc, prop) in enumerate(zip(violations, proposals)):
-        if not _has_payload(prop):
-            continue
-        vcs = _verifier_calls(rc, prop, source_files)
-        for vc in vcs:
-            all_verify_calls.append(vc)
-            verify_index.append((i, "gpt" if "gpt" in vc.name else "gemini"))
-    verify_briefs = [_write_brief(c, run_dir) for c in all_verify_calls]
-    if on_progress: on_progress("verify", len(verify_briefs), 0)
-    await run_briefs_concurrently(verify_briefs, concurrency=concurrency)
-    verify_outputs = [_read_output(c, run_dir) or {} for c in all_verify_calls]
-
-    # group by violation
+    # Verifier-panel state (stays empty when verify=False -> no verifier 1/2 calls).
     per_violation_verifiers: list[list[dict]] = [[] for _ in violations]
     per_violation_verifier_kinds: list[list[str]] = [[] for _ in violations]
-    for (vi, kind), out in zip(verify_index, verify_outputs):
-        per_violation_verifiers[vi].append(out)
-        per_violation_verifier_kinds[vi].append(kind)
-
-    # ---- Stage 3: revise (only where any verifier disagrees) ----
     revise_calls: list[LLMCall | None] = [None] * len(violations)
-    for i, opinions in enumerate(per_violation_verifiers):
-        if not opinions:
-            continue
-        if any(not o.get("agrees", False) for o in opinions):
-            revise_calls[i] = _revise_call(violations[i], proposals[i],
-                                            opinions, source_files)
-    revise_briefs = [_write_brief(c, run_dir) for c in revise_calls if c]
-    if revise_briefs:
-        if on_progress: on_progress("revise", len(revise_briefs), 0)
-        await run_briefs_concurrently(revise_briefs, concurrency=concurrency)
-    revised = [(_read_output(c, run_dir) or {}) if c else None for c in revise_calls]
+    revised: list[dict | None] = [None] * len(violations)
+
+    if verify:
+        # ---- Stage 2: verify, panel × violations, all in parallel ----
+        all_verify_calls: list[LLMCall] = []
+        verify_index: list[tuple[int, str]] = []   # (violation_idx, "gpt"/"gemini")
+        for i, (rc, prop) in enumerate(zip(violations, proposals)):
+            if not _has_payload(prop):
+                continue
+            vcs = _verifier_calls(rc, prop, source_files)
+            for vc in vcs:
+                all_verify_calls.append(vc)
+                verify_index.append((i, "gpt" if "gpt" in vc.name else "gemini"))
+        verify_briefs = [_write_brief(c, run_dir) for c in all_verify_calls]
+        if on_progress: on_progress("verify", len(verify_briefs), 0)
+        await run_briefs_concurrently(verify_briefs, concurrency=concurrency)
+        verify_outputs = [_read_output(c, run_dir) or {} for c in all_verify_calls]
+        for (vi, kind), out in zip(verify_index, verify_outputs):
+            per_violation_verifiers[vi].append(out)
+            per_violation_verifier_kinds[vi].append(kind)
+
+        # ---- Stage 3: revise (only where any verifier disagrees) ----
+        for i, opinions in enumerate(per_violation_verifiers):
+            if opinions and any(not o.get("agrees", False) for o in opinions):
+                revise_calls[i] = _revise_call(violations[i], proposals[i],
+                                                opinions, source_files)
+        revise_briefs = [_write_brief(c, run_dir) for c in revise_calls if c]
+        if revise_briefs:
+            if on_progress: on_progress("revise", len(revise_briefs), 0)
+            await run_briefs_concurrently(revise_briefs, concurrency=concurrency)
+        revised = [(_read_output(c, run_dir) or {}) if c else None for c in revise_calls]
 
     # ---- Stage 4: reflect, one call per violation that produced a patch ----
     final_proposals = [revised[i] or proposals[i] for i in range(len(violations))]

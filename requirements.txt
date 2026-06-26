@@ -12,6 +12,12 @@ boto3>=1.34.0          # AWS Bedrock (Claude/Llama/Mistral/Nova) — enable with
 # Loads ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY from .env
 python-dotenv>=1.0.0
 
+# Netlist gate (`ready` command): real Yosys synthesis with no system install /
+# root needed — the official WASM build. Provides the `yowasp-yosys` command;
+# symlink it to `yosys` or set COGNI_YOSYS_BIN=yowasp-yosys. Omit if a native
+# `yosys` is already on PATH.
+yowasp-yosys>=0.36
+
 # Optional but recommended — PyYAML lets you write richer scenario configs.
 # Without it, cogni_check.py falls back to a tiny built-in parser that
 # handles the flat shape we ship.

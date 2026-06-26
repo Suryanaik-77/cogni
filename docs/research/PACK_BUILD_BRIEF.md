@@ -107,7 +107,7 @@ For each dossier rule, produce ONE JSON object with these fields:
 After writing the JSON, run:
 
 ```bash
-cd /home/user/workspace/cogni
+cd /path/to/cogni   # repo root
 python3 -c "
 import json, jsonschema
 with open('agent/kb_schema.json') as f: schema = json.load(f)
@@ -124,7 +124,7 @@ If validation fails, fix and re-run until it passes.
 After validation, run the existing loader to make sure cogni accepts the pack:
 
 ```bash
-cd /home/user/workspace/cogni
+cd /path/to/cogni   # repo root
 python3 -c "
 from agent.kb import KnowledgeBase
 kb = KnowledgeBase.load('packs/rtl/rules.json')   # or packs/synth

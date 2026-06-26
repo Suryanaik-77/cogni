@@ -7,7 +7,7 @@ operational.
 ## 0. Setup
 
 ```bash
-cd /home/user/workspace/cogni
+cd /path/to/cogni   # repo root
 python3 -m pip install -r requirements.txt   # if a venv is in play
 export ANTHROPIC_API_KEY=...                 # required for primary + verifiers
 export OPENAI_API_KEY=...                    # required for the gpt verifier

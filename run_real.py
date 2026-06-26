@@ -236,6 +236,13 @@ def cmd_predict(session_dir: str):
                 world_d = json.load(f)
             focused_facts = {k: world_d["facts"][k]["value"] for k in out.get("focused_fact_keys", [])
                              if k in world_d["facts"]}
+            # Always give the predictor the raw source if available — a human
+            # reviewer reasons from the code, not from aggregate counts. The
+            # oracle (Verilator lint) stays a separate computation, so this is
+            # input to cognition, not the answer key. Prevents blanket refusals
+            # on count questions ("I can't see the actual RTL").
+            if "rtl.source" in world_d["facts"] and "rtl.source" not in focused_facts:
+                focused_facts["rtl.source"] = world_d["facts"]["rtl.source"]["value"]
 
             if not focused_rules:
                 # refusal — log and skip
@@ -455,6 +462,52 @@ def cmd_reflect(session_dir: str):
 # Stage 5: FINALIZE — apply KB edits, write summary
 # ---------------------------------------------------------------------------
 
+# Predicate ops the v1 engine understands (agent/predicates.py), incl. the
+# LLM-spelling aliases. A dict carrying one of these is a REAL predicate and
+# must be preserved verbatim — flattening it to a tag silently kills the gate.
+_PRED_OPS = frozenset({
+    "all", "any", "not", "tag", "eq", "ne", "lt", "lte", "gt", "gte",
+    "in", "contains", "includes", "matches", "exists", "tool",
+    "equals", "equal", "==", "not_equals", "notequals", "!=",
+})
+
+
+def _normalize_unless(items) -> list:
+    """Normalize an `unless`/`added_unless` list to valid v1 predicate nodes.
+
+    The durable destination is the master pack, which is loaded as v1 — where
+    `unless` entries are evaluated as predicate dicts. A BARE STRING node there
+    evaluates to False (never blocks), and a real predicate flattened to a tag
+    becomes a tag that never matches; either way the intended gate silently
+    vanishes. So:
+
+      * real predicate dict ({"op": "in", ...})  -> kept verbatim
+      * tag string "foo"                          -> {"op": "tag", "name": "foo"}
+      * tag-shaped dict ({"name"/"tag"/...})      -> {"op": "tag", "name": ...}
+      * anything truly unparseable                -> folded to a tag so one bad
+                                                     entry can't crash reflection
+
+    (Previously this flattened EVERY dict to a string, turning
+    `{op:in,key:rtl.foo,values:[...]}` into the tag "rtl.foo" — a gate that
+    could never fire.)
+    """
+    out: list = []
+    for x in items or []:
+        if isinstance(x, str):
+            out.append({"op": "tag", "name": x})
+        elif isinstance(x, dict):
+            if x.get("op") in _PRED_OPS:
+                out.append(x)  # real predicate — preserve verbatim
+            else:
+                tag = (x.get("name") or x.get("tag") or x.get("condition")
+                       or x.get("key") or x.get("value"))
+                out.append({"op": "tag",
+                            "name": str(tag) if tag is not None
+                            else json.dumps(x, sort_keys=True)})
+        else:
+            out.append({"op": "tag", "name": str(x)})
+    return out
+
 def cmd_finalize(session_dir: str):
     from agent.core import KBEdit, KBEditKind, RuleStrength, RuleStatus, Rule, Surprise
 
@@ -542,21 +595,38 @@ def cmd_finalize(session_dir: str):
                 new_rule = None
                 if e.get("new_rule"):
                     nr = e["new_rule"]
+                    nr_stage = nr.get("stage")
                     new_rule = Rule(
                         id=nr.get("id") or new_id("r"),
                         statement=nr.get("statement", ""),
-                        when=nr.get("when", []), unless=nr.get("unless", []),
-                        stage=nr.get("stage"),
+                        when=nr.get("when", []),
+                        unless=_normalize_unless(nr.get("unless", [])),
+                        stage=nr_stage,
                         strength=RuleStrength(nr.get("strength", "tendency")),
                         citations=nr.get("citations", []),
                         rationale=nr.get("rationale", ""),
+                        # Carry predicts so the learned rule is GRADEABLE next
+                        # run (key+channel+band). Without this it lands with an
+                        # empty predicts and can never be checked or promoted.
+                        predicts=nr.get("predicts", []),
+                        # Born v1: when/unless/predicts are predicate-dict shaped,
+                        # so the rule must be marked v1 and given a v1 stage
+                        # filter. Under the v0 default (schema_version=0),
+                        # applies_to() takes the tag-set path and these dict
+                        # predicates would never match — the freshly-learned rule
+                        # would be silently unrecallable within this same run.
+                        schema_version=1,
+                        applies_to_v1={"stage": [nr_stage] if nr_stage else []},
                     )
                 new_strength = RuleStrength(e["new_strength"]) if e.get("new_strength") else None
                 edit = KBEdit(
                     id=new_id("kbe"), kind=kind,
                     target_rule_id=e.get("target_rule_id"),
                     new_rule=new_rule, new_strength=new_strength,
-                    added_unless=e.get("added_unless", []),
+                    # Normalize to valid v1 predicate nodes so a real predicate
+                    # survives into the pack instead of being flattened to a
+                    # never-matching tag (and a malformed entry can't crash).
+                    added_unless=_normalize_unless(e.get("added_unless", [])),
                     rationale=e.get("rationale", ""),
                 )
                 kb.apply(edit)
@@ -567,6 +637,16 @@ def cmd_finalize(session_dir: str):
                          "scenario": scen_name, "qid": qid}
                 if edit.new_rule:
                     edrec["new_rule"] = edit.new_rule.to_dict()
+                    # Warn loudly (not silently) if a learned rule is born with
+                    # no gradeable predict — promote will skip it, so the lesson
+                    # is lost unless a human notices. (The reflector schema now
+                    # blocks `[{}]`; this still catches an empty `[]`.)
+                    if not any(isinstance(p, dict) and p.get("measurement_key")
+                               for p in (edit.new_rule.predicts or [])):
+                        print(f"[finalize] WARNING: learned rule "
+                              f"{edit.new_rule.id} has no gradeable predicts — "
+                              f"promote will SKIP it (scenario={scen_name}, "
+                              f"qid={qid})", flush=True)
                 jsonl_append(os.path.join(session_dir, "kb_edits.jsonl"), edrec)
                 row_edits.append(edrec)
                 summary["totals"]["n_kb_edits"] += 1
@@ -662,6 +742,49 @@ async def _exec_stage(session_dir: str, stage: str, concurrency: int) -> dict:
             "cached": n_cached, "wall_s": wall}
 
 
+def cmd_promote(session_dir: str, *, pack_path: str = "packs/rtl/rules.json",
+                apply: bool = False, scenario: str | None = None,
+                include_ungradeable: bool = False) -> None:
+    """Promote a session's learned KB edits back into the master pack.
+
+    Dry-run by default (prints the plan); --apply writes after backing the
+    pack up to <pack>.bak. This is what gives the agent MEMORY across runs:
+    without it every run reloads the pristine pack and re-invents the same
+    rule. See agent/promote.py for the dedup + quality-gate rules.
+    """
+    from agent.promote import promote_session
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    res = promote_session(session_dir, pack_path, apply=apply,
+                          scenario=scenario,
+                          include_ungradeable=include_ungradeable, today=today)
+
+    print("=" * 60)
+    print(f"  PROMOTE  session={res['session']}")
+    print(f"  pack    ={res['pack_path']}")
+    print(f"  mode    ={'APPLY (writing)' if apply else 'dry-run (preview only)'}")
+    print("=" * 60)
+    if not res["plan"]:
+        print("  nothing to promote (no kb_edits.jsonl edits matched).")
+        return
+    for p in res["plan"]:
+        mark = "[apply]" if p["decision"] == "apply" else "[skip ]"
+        print(f"  {mark} {p['op']:<11} {p['rule_id']}")
+        if p["detail"]:
+            print(f"          -> {p['detail']}")
+    n_apply = sum(1 for p in res["plan"] if p["decision"] == "apply")
+    print("-" * 60)
+    if res["applied"]:
+        s = res["summary"]
+        print(f"  WROTE {n_apply} change(s): {s}")
+        print(f"  backup: {res['backup']}")
+    else:
+        if n_apply:
+            print(f"  {n_apply} change(s) WOULD be applied. Re-run with --apply to write.")
+        else:
+            print("  no changes to apply (all skipped — see reasons above).")
+    print("=" * 60)
+
+
 def cmd_fix_phase(session_dir: str, concurrency: int = 4) -> None:
     """PHASE 3 (opt-in via --with-fixes): close the fix loop with reality.
 
@@ -734,7 +857,8 @@ def cmd_fix_phase(session_dir: str, concurrency: int = 4) -> None:
 
 
 def cmd_run_all_api(args: list[str], concurrency: int = 8,
-                    with_fixes: bool = False) -> None:
+                    with_fixes: bool = False, promote: bool = False,
+                    include_ungradeable: bool = False) -> None:
     """End-to-end async runner. Either resume an existing session_dir, or
     start fresh from one or more scenario dirs.
 
@@ -826,6 +950,34 @@ def cmd_run_all_api(args: list[str], concurrency: int = 8,
     if with_fixes:
         cmd_fix_phase(session_dir, concurrency=max(2, concurrency // 2))
 
+    # Opt-in: write what was learned back into each scenario's MASTER pack, so
+    # the NEXT run recalls it instead of re-learning. Without this every run
+    # reloads the pristine pack and re-derives the same rules. One pack per
+    # scenario; promote each once.
+    if promote:
+        from agent.promote import promote_session
+        state = _load_state(session_dir, "session")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        promoted_packs: set[str] = set()
+        print()
+        for scen_name, scen in state["scenarios"].items():
+            pack_path = scen.get("config", {}).get("pack_path")
+            if not pack_path or pack_path in promoted_packs:
+                continue
+            promoted_packs.add(pack_path)
+            res = promote_session(session_dir, pack_path, apply=True,
+                                  scenario=scen_name,
+                                  include_ungradeable=include_ungradeable,
+                                  today=today)
+            n_apply = sum(1 for p in res["plan"] if p["decision"] == "apply")
+            print(f"[promote] {scen_name} -> {pack_path}: "
+                  f"{n_apply} change(s) written"
+                  + (f", backup {res.get('backup')}" if res.get("applied") else
+                     " (nothing gradeable to promote)"))
+            for p in res["plan"]:
+                mark = "[apply]" if p["decision"] == "apply" else "[skip ]"
+                print(f"           {mark} {p['op']:<10} {p['rule_id']}  {p['detail']}")
+
 
 if __name__ == "__main__":
     # RTL/question text contains UTF-8 (em-dashes etc.). Some shells expose a
@@ -839,10 +991,25 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "predict", "verify", "verify-api",
-                                      "reflect", "finalize", "run-all-api"])
+                                      "reflect", "finalize", "run-all-api",
+                                      "promote"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="Max concurrent API calls per stage (default 8)")
+    ap.add_argument("--apply", action="store_true",
+                    help="promote: actually write learned rules back into the "
+                         "master pack (default is a dry-run preview).")
+    ap.add_argument("--pack", default="packs/rtl/rules.json",
+                    help="promote: master pack to merge learning into.")
+    ap.add_argument("--scenario", default=None,
+                    help="promote: only promote edits from this scenario name.")
+    ap.add_argument("--include-ungradeable", action="store_true",
+                    help="promote: also promote new rules with no predicts "
+                         "(tool/plumbing notes). Off by default.")
+    ap.add_argument("--promote", action="store_true",
+                    help="run-all-api: after the run, write learned rules back "
+                         "into each scenario's MASTER pack in the SAME command "
+                         "(so the next run recalls them instead of re-learning).")
     ap.add_argument("--test-mode", action="store_true",
                     help="Use cheap/fast models (Sonnet + gpt-5-mini) for iteration. "
                          "Equivalent to COGNI_TEST_MODE=1.")
@@ -897,4 +1064,9 @@ if __name__ == "__main__":
         # ns.args[0] is either:
         #   - existing session_dir (resume)
         #   - one or more scenario dirs (fresh start)
-        cmd_run_all_api(ns.args, concurrency=ns.concurrency, with_fixes=ns.with_fixes)
+        cmd_run_all_api(ns.args, concurrency=ns.concurrency, with_fixes=ns.with_fixes,
+                        promote=ns.promote, include_ungradeable=ns.include_ungradeable)
+    elif ns.cmd == "promote":
+        cmd_promote(ns.args[0], pack_path=ns.pack, apply=ns.apply,
+                    scenario=ns.scenario,
+                    include_ungradeable=ns.include_ungradeable)

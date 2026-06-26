@@ -1,0 +1,37 @@
+name: buggy_demo
+domain: vlsi
+description: |
+  RTL-stage prediction over an SPI master (spi_master.sv) that LOOKS clean and
+  disciplined but hides several real, Verilator-catchable bugs: a 3-bit counter
+  compared to a 32-bit int parameter (WIDTH), a case with no default arm
+  (CASEINCOMPLETE), unassigned combinational paths (LATCH), and a blocking
+  assignment inside always_ff (BLKSEQ).
+
+  Purpose: surprise the rulebook. The well-structured surface tempts the
+  predictor into "clean" predictions; live Verilator proves otherwise. Each
+  wrong verdict feeds the reflector, which can propose NEW rules or sharpen
+  existing ones from the miss.
+
+stage: rtl
+tool:  verilator
+
+# Auto-generate questions from the live facts + rule pack. No questions.json.
+generate_questions: true
+
+pack_path: packs/rtl/rules.json
+
+# Perceiver: LIVE Verilator parse of the SPI master. Tagged ai_generated so the
+# AI-specific rules are also in the candidate set.
+perceiver:
+  top: spi_master
+  rtl_files: scenarios/buggy_demo/rtl/spi_master.sv
+  code_origin: ai_generated
+  author_intent: "SPI master with parameterizable data width and clock divider"
+
+# Oracle: LIVE Verilator lint -> the real answer key. No findings_path, so the
+# oracle runs Verilator itself and grades against whatever it actually reports.
+oracle:
+  top: spi_master
+  rtl_root: scenarios/buggy_demo/rtl
+
+confidence_floor: uncertain

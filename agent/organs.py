@@ -168,6 +168,21 @@ explicitly refuse.
 agent knowing what it doesn't know. Prefer a clean refusal with a
 list of missing evidence over a low-confidence guess.
 
+**If `focused_facts` contains `rtl.source`, the actual RTL code is in
+front of you — READ IT.** Do not refuse a count question ("how many
+latches / width warnings / blocking-in-always_ff / cases without default")
+with "I cannot see the code": you can. Read the source, find the concrete
+instances, and commit a count. Reason like a reviewer: a `case` over an
+N-bit enum that lists all 2^N values is complete even with no `default`;
+a signal not assigned on every arm of an `always_comb` is a latch
+candidate; a blocking `=` inside `always_ff` is a blkseq hazard; an
+operator comparing a small vector against a 32-bit `int`/parameter is a
+width-mismatch candidate. You may still be wrong — the tool computes its
+own answer and may score 0 where the code merely LOOKS hazardous — but
+that is a falsifiable prediction, which is exactly what is wanted. Only
+refuse a source-backed count question if the source is truncated past the
+relevant logic or genuinely ambiguous.
+
 **If you predict:**
 - The claim must be falsifiable — reality must be able to prove it wrong.
 - State the falsifier explicitly: what observation would refute the claim.
@@ -187,6 +202,23 @@ those exact `measurement_key`s so the grader can match. Do not invent
 new key names. If the rule's `predicts` is empty, fall back to the
 `measurement_key` shown in the "Measurement key" block above (or refuse
 if neither is present).
+
+**Tool-behavior rules win "what will the tool report" questions.**
+Some questions ask what a specific TOOL will measure — "how many latches
+will *Verilator* infer", "how many WIDTH warnings will *Verilator* emit".
+These are questions about the TOOL'S OUTPUT, not about design correctness.
+If a focused rule directly describes that tool's behavior on this exact
+measurement key (e.g. a rule whose `predicts` is `rtl.lint.latch.count =
+[0,0]` and whose statement says "Verilator does not flag this pattern"),
+**that rule is the load-bearing answer — cite it and predict its value**,
+even when a separate design rule says the code is hazardous. Both can be
+true at once: the code is latch-prone AND this tool reports 0. The
+question decides which you answer:
+- "will the TOOL report / infer / emit / flag X" → answer with the
+  tool-behavior rule's value (often 0).
+- "is the DESIGN correct / safe / latch-free" → answer with the design
+  rule. Do not let a design rule override a tool-behavior rule on a
+  tool-output question; that is exactly the miss that keeps recurring.
 
 **Respect rule `kind`:**
 - `constraint` rules are pass/fail.
@@ -416,9 +448,47 @@ REFLECTOR_SCHEMA = {
                 "properties": {
                     "kind": {"type": "string", "enum": ["add", "strengthen", "weaken", "scope", "retire", "rewrite"]},
                     "target_rule_id": {"type": "string"},
-                    "new_rule": {"type": "object"},
+                    "new_rule": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "statement": {"type": "string"},
+                            "when": {"type": "array"},
+                            "unless": {"type": "array"},
+                            "stage": {"type": ["string", "null"]},
+                            "strength": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "citations": {"type": "array"},
+                            # Gradeable prediction(s) — what reality this rule
+                            # commits to. Without this the rule can never be
+                            # checked against a measurement.
+                            "predicts": {
+                                "type": "array",
+                                # Every predicts item MUST carry the fields that
+                                # make it gradeable. Without this, a model can
+                                # emit `predicts:[{}]` — a non-empty list that
+                                # passes a bare array check but has no
+                                # measurement_key, so the rule is born
+                                # ungradeable and is silently dropped by promote.
+                                "items": {
+                                    "type": "object",
+                                    "required": ["measurement_key", "channel", "value"],
+                                    "properties": {
+                                        "measurement_key": {"type": "string"},
+                                        "channel": {"type": "string",
+                                                     "enum": ["intervals", "enum", "includes", "excludes"]},
+                                        "value": {},
+                                        "horizon": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    },
                     "new_strength": {"type": "string", "enum": ["law", "strong", "tendency", "situational", "heuristic"]},
-                    "added_unless": {"type": "array", "items": {"type": "string"}},
+                    # Items SHOULD be plain string tags, but models sometimes
+                    # emit objects here. Don't hard-fail the whole reflection on
+                    # that — accept any item and coerce to a string at finalize.
+                    "added_unless": {"type": "array"},
                     "rationale": {"type": "string"},
                 },
             },
@@ -452,6 +522,29 @@ updates the knowledge base from this experience.
 
    For each edit, give a one-sentence rationale.
 
+## Every `add`/`rewrite` rule MUST be gradeable — fill `predicts`
+A rule with no `predicts` can never be checked against reality and is dead
+weight. So every `new_rule` you emit MUST carry a non-empty `predicts` list:
+
+  `predicts: [{"measurement_key": "...", "channel": "intervals|enum|includes|excludes", "value": ..., "horizon": "rtl"}]`
+
+- Key it to a measurement that the oracle ACTUALLY emits. Look at the
+  `reality.measurements` keys in your input — use one of THOSE exact keys.
+  Do not invent a key the tool never produces (that just yields perpetual
+  `unfalsifiable` verdicts).
+- `intervals` value = `{"min": N, "max": M}`; `enum` value = list of allowed.
+- **Tool-coverage notes are the tricky case.** If the lesson is "tool X does
+  not flag pattern Y" and reality measured 0, then make the rule predict that
+  measured-0 outcome on the key the tool DOES emit — e.g.
+  `{"measurement_key": "rtl.lint.latch.count", "channel": "intervals",
+  "value": {"min": 0, "max": 0}, "horizon": "rtl"}` — so the note is a real,
+  checkable claim about the tool's behavior ("this tool reports 0 here"),
+  not unfalsifiable prose. The functional design rule stays separate and
+  strong (see the oracle-is-a-tool discipline above).
+- If you genuinely cannot key the rule to any emitted measurement, do NOT
+  `add` it — say so in `surprise.why_we_missed_it` instead. An ungradeable
+  rule is worse than no rule.
+
 ## Discipline
 - Don't propose edits if the prediction was right and the reasoning was right.
   Right-and-right-reason verdicts strengthen rules through performance, not edits.
@@ -459,6 +552,36 @@ updates the knowledge base from this experience.
 - Don't propose `retire` after a single failure unless the rule is clearly
   contradicted by mechanism, not just outcome.
 - Be specific. Vague rules don't help future predictions.
+
+## The oracle is a TOOL, not design truth (read carefully — most important)
+Reality here is a lint tool's output (e.g. Verilator). A lint tool is a
+STRUCTURAL oracle: it reports the subset of hazards IT chooses to flag, with
+its own coverage gaps and leniency. **It is not proof that the design is
+functionally correct.** Before you weaken/scope/retire a rule, decide which
+of these two situations you are in:
+
+1. **The mechanism was wrong** — the design is genuinely fine; the predictor
+   mis-read the code or the rule's premise doesn't hold here. → It is OK to
+   `weaken`/`scope` the rule, citing the design fact that makes it safe.
+
+2. **The tool under-reported** — the design DOES have the hazard the rule
+   warns about, but this tool didn't flag it (measured count is LOWER than a
+   correct design reading would predict; often 0). → **DO NOT weaken, scope,
+   or retire the functional rule.** The rule was functionally right; the tool
+   is lenient. Degrading a correct design rule because a tool has a blind spot
+   actively corrupts the rulebook.
+
+**Test to tell them apart:** re-read the cited design facts / source. If a
+careful engineer would still call the code hazardous (e.g. a signal left
+unassigned on one arm of an `always_comb` with no default is latch-prone by
+language semantics, even if THIS tool emits 0 latches), you are in case 2.
+
+**Rule of thumb:** when `measured < predicted` on a hazard/violation COUNT and
+the design genuinely exhibits the pattern, prefer recording a TOOL-COVERAGE
+observation — an `add` of a clearly tool-scoped note like "tool X does not
+flag pattern Y" (with `when` gated on that tool) — over editing the functional
+rule. Keep the design rule intact; capture the tool's behavior separately.
+Never let a tool's leniency lower the strength of a functional design rule.
 
 ## Verdict trust (read carefully)
 The verdict input includes `verdict_confidence` and `channel`:

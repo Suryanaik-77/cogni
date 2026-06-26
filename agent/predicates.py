@@ -19,7 +19,7 @@ Tags (`{op:"tag", name:X}`) are looked up in WorldModel.tags.
 
 Boolean ops: all, any, not.
 
-Compare ops: eq, ne, lt, lte, gt, gte, in, matches, exists.
+Compare ops: eq, ne, lt, lte, gt, gte, in, contains, includes, matches, exists.
 
 The evaluator is intentionally tiny (~70 lines): no caching, no
 short-circuit performance hacks. It runs once per rule per question.
@@ -97,6 +97,23 @@ def evaluate(node: dict,
 
     op = node["op"]
 
+    # Tolerate op synonyms that LLM-authored (learned) rules sometimes emit,
+    # so a rule gated with `equals` instead of `eq` still fires instead of
+    # silently never matching.
+    op = {"equals": "eq", "equal": "eq", "==": "eq",
+          "not_equals": "ne", "notequals": "ne", "!=": "ne"}.get(op, op)
+
+    # ---- tool identity ----
+    # `{op:"tool", name:"verilator"}` — satisfied if the world is tagged
+    # tool_<name> or carries a matching `tool` fact. Lets tool-behavior rules
+    # gate on the producing tool regardless of which spelling the author used.
+    if op == "tool":
+        name = str(node.get("name") or node.get("value") or "").lower()
+        if f"tool_{name}" in tags:
+            return True
+        _f, _v = _lookup("tool", facts, measurements, target)
+        return _f and str(_v).lower() == name
+
     # ---- boolean combinators ----
     if op == "all":
         return all(evaluate(p, world, reality, target) for p in node.get("preds", []))
@@ -136,6 +153,19 @@ def evaluate(node: dict,
     if op == "in":
         try:
             return val in node.get("values", [])
+        except TypeError:
+            return False
+    if op in ("contains", "includes"):
+        # The MIRROR of `in`: the fact's value is a collection/string and we
+        # ask whether it holds the rule's needle. LLM-authored rules use this
+        # for "rtl.source contains 'latch'". A list/tuple/set needle means all
+        # must be present. (Distinct from `in`, where the FACT is the needle and
+        # the rule supplies the haystack via `values`.)
+        needle = node.get("value", node.get("values"))
+        try:
+            if isinstance(needle, (list, tuple, set)):
+                return all(n in val for n in needle)
+            return needle in val
         except TypeError:
             return False
     if op == "matches":

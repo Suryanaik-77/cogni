@@ -144,6 +144,29 @@ class VerilatorRTLPerceiver:
         with open(out_xml) as f:
             return f.read()
 
+    @staticmethod
+    def _read_sources(files: list[str], max_chars: int = 16000) -> str:
+        """Concatenate the RTL sources (each headed by its path) for the
+        predictor to read. Bounded so a huge design can't blow up the prompt;
+        truncation is marked explicitly."""
+        chunks: list[str] = []
+        total = 0
+        for f in files:
+            try:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    body = fh.read()
+            except OSError:
+                continue
+            header = f"// ===== {f} =====\n"
+            chunk = header + body
+            if total + len(chunk) > max_chars:
+                chunk = chunk[: max(0, max_chars - total)] + "\n// ...[truncated]...\n"
+                chunks.append(chunk)
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        return "\n".join(chunks).strip()
+
     def _perceive_from_verilator(self, world: WorldModel, files: list[str]) -> None:
         xml_text = self._run_verilator_xml(files)
         loc = 0
@@ -168,6 +191,26 @@ class VerilatorRTLPerceiver:
         for t in tags:
             world.tags.add(t)
         world.tags.add("rtl_stage")
+
+        # Expose the TOOL identity so tool-behavior rules can be recalled.
+        # These facts come from Verilator, so learned rules gated on the tool
+        # (e.g. "Verilator reports 0 latches on this pattern") match and reach
+        # the predictor instead of being silently filtered out of recall.
+        # Both forms are emitted because rules in the wild gate either way:
+        # a `tool=verilator` fact and a `tool_verilator` tag.
+        world.add("tool", "verilator", source=source)
+        world.tags.add("tool_verilator")
+
+        # Emit the raw source as a fact so the predictor can REASON from the
+        # actual code the way a human reviewer does — counting cases, spotting
+        # missing default arms, blocking assignments, suspect width compares.
+        # This is NOT the lint answer key: the oracle runs Verilator lint as a
+        # SEPARATE computation, so a latchy-LOOKING block Verilator scores as 0
+        # still falsifies the prediction. Without this, the predictor only sees
+        # aggregate counts and correctly refuses every count question.
+        src_text = self._read_sources(files)
+        if src_text:
+            world.add("rtl.source", src_text, source=source)
 
     def _perceive_from_manifest(self, world: WorldModel) -> None:
         if not os.path.exists(self.manifest_path):

@@ -511,7 +511,7 @@ class BedrockTransport(Transport):
 # verifier 2 from Mistral to Nova by setting COGNI_BEDROCK_VERIFY2_MODEL.
 #
 # Two tiers, picked by COGNI_TEST_MODE (read here at import):
-#   production : Claude Sonnet + Llama-70B + Mistral Large  (high models)
+#   production : Claude Sonnet + Llama-70B + Nova Pro        (high models)
 #   test       : Claude Haiku  + Llama-8B  + Nova Lite       (cheap models)
 # Per-role env overrides win over both tiers.
 _BEDROCK_TEST_TIER = os.environ.get("COGNI_TEST_MODE", "").strip() in ("1", "true", "yes")
@@ -523,7 +523,10 @@ if _BEDROCK_TEST_TIER:
 else:
     _DEF_PREDICT = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     _DEF_VERIFY1 = "us.meta.llama3-3-70b-instruct-v1:0"
-    _DEF_VERIFY2 = "mistral.mistral-large-2407-v1:0"  # or "us.amazon.nova-pro-v1:0"
+    # Nova Pro: Mistral Large (mistral.mistral-large-2407-v1:0) is NOT a valid
+    # Converse id in many accounts/regions and fails every call. Nova Pro is a
+    # broadly-available cross-region profile. Override via COGNI_BEDROCK_VERIFY2_MODEL.
+    _DEF_VERIFY2 = "us.amazon.nova-pro-v1:0"
 
 _BEDROCK_PREDICT_MODEL = os.environ.get("COGNI_BEDROCK_PREDICT_MODEL", _DEF_PREDICT)
 _BEDROCK_VERIFY1_MODEL = os.environ.get("COGNI_BEDROCK_VERIFY1_MODEL", _DEF_VERIFY1)

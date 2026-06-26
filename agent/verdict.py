@@ -44,6 +44,7 @@ Backward compatibility:
   codebase that imports them needs to change.
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from .core import Prediction, Reality, Verdict, VerdictKind, new_id
@@ -75,6 +76,14 @@ def _channel_intervals(structured: dict, reality: Reality,
     if not isinstance(intervals, dict):
         return out
     for key, bounds in intervals.items():
+        # Accept both `[lo, hi]` and `{"min": lo, "max": hi}` — predictors
+        # mirror whichever form the cited rule's `predicts` used, and the
+        # rule packs use the {min,max} object form. Open ends -> +/-inf.
+        if isinstance(bounds, dict):
+            lo = bounds.get("min", bounds.get("lo"))
+            hi = bounds.get("max", bounds.get("hi"))
+            bounds = [float("-inf") if lo is None else lo,
+                      float("inf") if hi is None else hi]
         if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
                 and all(isinstance(x, (int, float)) for x in bounds)):
             continue
@@ -88,7 +97,22 @@ def _channel_intervals(structured: dict, reality: Reality,
         inside = lo <= a <= hi
         # Direction tolerance: actual within tol*midpoint of bounds.
         mid = 0.5 * (lo + hi)
-        direction_ok = abs(a - mid) / max(abs(mid), 1e-9) <= tolerance
+        if math.isfinite(mid):
+            direction_ok = abs(a - mid) / max(abs(mid), 1e-9) <= tolerance
+        else:
+            # Open-ended band ([lo, inf], [-inf, hi], or [-inf, inf]): the
+            # midpoint is +/-inf or NaN, so the distance-to-midpoint test always
+            # fails and right-direction credit becomes impossible. A miss can
+            # only be past the FINITE edge, so measure closeness to that edge
+            # instead. (Fully unbounded -> any actual is inside, no real miss.)
+            if math.isfinite(lo) and a < lo:
+                edge = lo
+            elif math.isfinite(hi) and a > hi:
+                edge = hi
+            else:
+                edge = None
+            direction_ok = (edge is None
+                            or abs(a - edge) / max(abs(edge), 1e-9) <= tolerance)
         out.append(_ChannelResult(
             channel="intervals", decided=True, correct=inside,
             direction_ok=direction_ok, confidence="high",

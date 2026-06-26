@@ -22,3 +22,6 @@ scenarios/*/llm_calls/
 *.swp
 *.swo
 *~
+
+# promote-step pack backups (transient)
+packs/**/*.json.bak

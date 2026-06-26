@@ -14,15 +14,16 @@ description: |
 stage: synth
 tool:  yosys
 
-# Where the design lives (unchanged from ibex_signoff)
-rtl_root: /home/user/workspace/cognipd/design/ibex
+# Where the design lives. External ibex design data is expected as a
+# sibling `cognipd/` checkout next to this repo (not bundled here).
+rtl_root: ../cognipd/design/ibex
 
 # v1 synth knowledge pack
-pack_path: /home/user/workspace/cogni/packs/synth/rules.json
+pack_path: packs/synth/rules.json
 
 # Oracle reuses the same ground-truth artifacts cognipd produced.
 oracle:
-  reports_dir:   /home/user/workspace/cognipd/design/ibex/reports
-  findings_path: /home/user/workspace/cognipd/runs/synth_findings.json
+  reports_dir:   ../cognipd/design/ibex/reports
+  findings_path: ../cognipd/runs/synth_findings.json
 
 confidence_floor: uncertain

@@ -60,7 +60,14 @@ class KnowledgeBase:
                         seen[key] = a_dict
                 r.unless = list(seen.values())
             else:
-                r.unless = sorted(set(existing) | set(added))
+                # v0 unless is a set of tag strings. `added` may now arrive as
+                # predicate dicts (v1 form) — reduce each to its tag name so the
+                # set ops don't choke on an unhashable dict.
+                added_tags = [a if isinstance(a, str)
+                              else (a.get("name") if isinstance(a, dict) else str(a))
+                              for a in added]
+                added_tags = [t for t in added_tags if t]
+                r.unless = sorted(set(existing) | set(added_tags))
         elif edit.kind == KBEditKind.RETIRE:
             r.status = RuleStatus.RETIRED
         elif edit.kind == KBEditKind.REWRITE and edit.new_rule:

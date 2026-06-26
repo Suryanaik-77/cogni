@@ -164,7 +164,7 @@ class YosysOracle:
         # Defer to cognipd's existing yosys_synth.tcl if present, else fail.
         # The point of this class is parsing, not orchestrating Yosys.
         if not tcl_template:
-            tcl_template = "/home/user/workspace/cognipd/runs/yosys_synth.tcl"
+            tcl_template = "../cognipd/runs/yosys_synth.tcl"
         if not os.path.exists(tcl_template):
             raise FileNotFoundError(f"yosys tcl not found: {tcl_template}")
         # Run it

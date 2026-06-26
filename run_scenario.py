@@ -232,7 +232,7 @@ def run(scenario_dir: str, dispatcher_kind: str = "mock",
     name = cfg.get("name", os.path.basename(scenario_dir))
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join("/home/user/workspace/cogni/runs", name, ts)
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", name, ts)
     os.makedirs(run_dir, exist_ok=True)
     print(f"[run] scenario={name} run_dir={run_dir} dispatcher={dispatcher_kind}", flush=True)
 

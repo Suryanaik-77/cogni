@@ -13,16 +13,17 @@ description: |
 stage: synth
 tool:  yosys
 
-# Where the design lives
-rtl_root: /home/user/workspace/cognipd/design/ibex
+# Where the design lives. External ibex design data is expected as a
+# sibling `cognipd/` checkout next to this repo (not bundled here).
+rtl_root: ../cognipd/design/ibex
 
 # Knowledge pack
-pack_path: /home/user/workspace/cogni/packs/vlsi/rules.json
+pack_path: packs/vlsi/rules.json
 
 # Oracle config (passed through to the synth/yosys oracle constructor)
 oracle:
-  reports_dir:   /home/user/workspace/cognipd/design/ibex/reports
-  findings_path: /home/user/workspace/cognipd/runs/synth_findings.json
+  reports_dir:   ../cognipd/design/ibex/reports
+  findings_path: ../cognipd/runs/synth_findings.json
 
 # Confidence floor (UNCERTAIN means: anything UNCERTAIN or above is allowed)
 confidence_floor: uncertain

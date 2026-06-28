@@ -176,7 +176,8 @@ def _rule_view(rc: RuleCheck) -> dict:
     }
 
 
-def _propose_call(rc: RuleCheck, source_files: dict[str, str]) -> LLMCall:
+def _propose_call(rc: RuleCheck, source_files: dict[str, str],
+                   memory_context: str = "") -> LLMCall:
     """source_files: { relative_path: file_content } — the snippets the patch
     will edit. Caller decides which files to expose.
     """
@@ -221,13 +222,16 @@ Read `inputs.json`. It contains:
   - `rule`        : the violated rule with its `examples` and `predicts[*]`
   - `violation`   : measured value, expected band, channel
   - `source_files`: { path: content } — the relevant source snippets
+  - `memory`      : (optional) prior agent knowledge about this design —
+                     past fix attempts, finding trends, accepted/reverted
+                     history. Use this to avoid repeating failed approaches.
 
 ## Output
 
 Return JSON matching the schema. `target_file` must be one of the keys in
 `source_files`. If you use a diff, its `---` / `+++` lines must use that path.
 """
-    inputs = {
+    inputs: dict[str, Any] = {
         "rule": _rule_view(rc),
         "violation": {
             "measurement_key": rc.checks[0].measurement_key if rc.checks else "",
@@ -238,6 +242,8 @@ Return JSON matching the schema. `target_file` must be one of the keys in
         },
         "source_files": source_files,
     }
+    if memory_context:
+        inputs["memory"] = memory_context
     return LLMCall(
         name=f"fix_propose.{_slug(rc.rule_id)}",
         model=_llm.MODEL_OPUS,
@@ -406,6 +412,7 @@ async def propose_fixes(violations: list[RuleCheck],
                         netlist_path: str | None = None,
                         concurrency: int = 4,
                         verify: bool = False,
+                        memory_context: str = "",
                         on_progress=None) -> list[FixProposal]:
     """Run the propose → (verify → revise) → reflect cognition chain over every
     violation. Returns one FixProposal per violation.
@@ -414,6 +421,11 @@ async def propose_fixes(violations: list[RuleCheck],
     verifier 2). It is OFF by default: the real check on a patch is re-running
     the tool (Verilator/Yosys) on the patched copy, so the LLM panel is
     redundant. Enable it only when you want a second opinion before applying.
+
+    `memory_context` (optional) is a text block summarising the agent's prior
+    knowledge about this design — past fix attempts, finding trends, etc.
+    It is injected into each proposer's inputs so the LLM can avoid repeating
+    failed approaches.
     """
     os.makedirs(run_dir, exist_ok=True)
     source_files = _gather_source(rtl_root, netlist_path)
@@ -422,7 +434,8 @@ async def propose_fixes(violations: list[RuleCheck],
         return []
 
     # ---- Stage 1: propose, fanned out across violations ----
-    propose_calls = [_propose_call(rc, source_files) for rc in violations]
+    propose_calls = [_propose_call(rc, source_files, memory_context)
+                     for rc in violations]
     propose_briefs = [_write_brief(c, run_dir) for c in propose_calls]
     if on_progress: on_progress("propose", len(propose_briefs), 0)
     await run_briefs_concurrently(propose_briefs, concurrency=concurrency)

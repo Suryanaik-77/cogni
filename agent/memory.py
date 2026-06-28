@@ -267,6 +267,107 @@ class DesignMemory:
         findings[measurement_key]["latest"] = measured
 
     # ------------------------------------------------------------------
+    # Fix-attempt tracking
+    # ------------------------------------------------------------------
+
+    def record_fix_attempt(self, rule_id: str, target_file: str,
+                           outcome: str, *, session_id: str = "",
+                           round_label: str = "",
+                           detail: str = "") -> None:
+        """Track an individual fix attempt (ACCEPTED / REVERTED / FAILED)."""
+        attempts = self.data.setdefault("fix_attempts", [])
+        attempts.append({
+            "rule_id": rule_id,
+            "target_file": target_file,
+            "outcome": outcome,
+            "session_id": session_id,
+            "round_label": round_label,
+            "detail": detail,
+            "at": _now(),
+        })
+        self.save()
+
+    def failed_fixes(self, *, rule_id: str | None = None) -> list[dict]:
+        """Return fix attempts that were REVERTED or FAILED."""
+        all_attempts = self.data.get("fix_attempts", [])
+        bad = [a for a in all_attempts if a["outcome"] in ("REVERTED", "FAILED")]
+        if rule_id:
+            bad = [a for a in bad if a["rule_id"] == rule_id]
+        return bad
+
+    def accepted_fixes(self) -> list[dict]:
+        all_attempts = self.data.get("fix_attempts", [])
+        return [a for a in all_attempts if a["outcome"] == "ACCEPTED"]
+
+    def format_fixer_context(self) -> str:
+        """Build a context block for the fixer LLM prompt summarising what
+        the agent already knows about this design."""
+        parts: list[str] = []
+
+        # Prior readiness runs
+        ready_runs = [r for r in self.data["runs"]
+                      if r.get("command") == "ready"]
+        if ready_runs:
+            last = ready_runs[-1]
+            parts.append(
+                f"Prior runs: {len(ready_runs)} readiness check(s).  "
+                f"Last verdict: {last.get('readiness_verdict', '?')}  "
+                f"Blockers remaining: {last.get('blockers_remaining', '?')}")
+
+        # Finding trends
+        trends: list[str] = []
+        for key, val in sorted(self.data.get("findings", {}).items()):
+            hist = val.get("history", [])
+            if len(hist) >= 2:
+                vals = [h["measured"] for h in hist[-4:]]
+                trends.append(f"  {key}: {' -> '.join(str(v) for v in vals)}")
+        if trends:
+            parts.append("Finding trends (recent):\n" + "\n".join(trends))
+
+        # Failed fixes
+        failed = self.failed_fixes()
+        if failed:
+            lines = []
+            for a in failed[-10:]:
+                lines.append(
+                    f"  [REVERTED] {a['rule_id']} on {a['target_file']}"
+                    + (f": {a['detail']}" if a.get("detail") else ""))
+            parts.append(
+                "Previously REVERTED fixes (did not reduce warnings):\n"
+                + "\n".join(lines)
+                + "\nDo NOT repeat the same approach. Try a DIFFERENT "
+                "strategy for these rules.")
+
+        # Accepted fixes
+        good = self.accepted_fixes()
+        if good:
+            lines = []
+            for a in good[-10:]:
+                lines.append(
+                    f"  [ACCEPTED] {a['rule_id']} on {a['target_file']}"
+                    + (f": {a['detail']}" if a.get("detail") else ""))
+            parts.append(
+                "Previously ACCEPTED fixes (confirmed by Verilator):\n"
+                + "\n".join(lines))
+
+        if not parts:
+            return ""
+        return ("## Design memory (prior agent knowledge)\n\n"
+                + "\n\n".join(parts))
+
+    # ------------------------------------------------------------------
+    # Source hash (for skip-if-unchanged)
+    # ------------------------------------------------------------------
+
+    def set_source_hash(self, h: str) -> None:
+        self.data["source_hash"] = h
+        self.save()
+
+    @property
+    def source_hash(self) -> str | None:
+        return self.data.get("source_hash")
+
+    # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
 

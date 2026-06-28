@@ -1036,6 +1036,27 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
     if not (orig_root and os.path.isdir(orig_root)):
         raise SystemExit("ready: need oracle.rtl_root pointing at a directory of RTL.")
     top = (cfg.get("perceiver") or {}).get("top")
+    design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
+
+    # --- Source hash: skip if unchanged since last GO ---
+    import hashlib
+    def _source_hash(root):
+        h = hashlib.sha256()
+        from agent.fix_verify import gather_rtl_files as _grf
+        for fp in _grf(root):
+            with open(fp, "rb") as fh:
+                h.update(fh.read())
+        return h.hexdigest()[:16]
+
+    src_hash = _source_hash(orig_root)
+    mem = get_or_create(design)
+    prior_verdict = mem.data["current_state"].get("readiness_verdict", "")
+    if (mem.source_hash == src_hash
+            and prior_verdict.startswith("GO")):
+        print(f"[ready] design '{design}' already GO and source unchanged "
+              f"— skipping. Use --force to re-run.")
+        if "--force" not in args:
+            return
 
     with open(cfg["pack_path"], encoding="utf-8") as f:
         pack = json.load(f)
@@ -1083,7 +1104,9 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
 
     def apply_fixes(rulechecks, label):
         fixdir = os.path.join(rounds_root, f"round_{label}")
+        mem_ctx = mem.format_fixer_context()
         fixes = propose_fixes_sync(rulechecks, fixdir, rtl_root=out_root,
+                                   memory_context=mem_ctx,
                                    concurrency=concurrency)
         conf_rank = {"likely": 0, "high": 0, "uncertain": 1,
                      "medium": 1, "unlikely": 2, "low": 2}
@@ -1112,6 +1135,9 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
                 ok = False
 
             if not ok:
+                mem.record_fix_attempt(
+                    fx.rule_id, tf, "FAILED", session_id=session_id,
+                    round_label=label, detail="patch did not apply")
                 continue
 
             post = _vlint()
@@ -1123,12 +1149,21 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
                 baseline_total = post_total
                 print(f"  [fix] ACCEPTED {tf} ({fx.rule_id}): "
                       f"warnings {before} -> {post_total}")
+                mem.record_fix_attempt(
+                    fx.rule_id, tf, "ACCEPTED", session_id=session_id,
+                    round_label=label,
+                    detail=f"warnings {before} -> {post_total}")
             else:
                 if backup is not None:
                     with open(dest, "w", encoding="utf-8") as fh:
                         fh.write(backup)
                 print(f"  [fix] REVERTED {tf} ({fx.rule_id}): "
                       f"warnings unchanged ({post_total})")
+                mem.record_fix_attempt(
+                    fx.rule_id, tf, "REVERTED", session_id=session_id,
+                    round_label=label,
+                    detail=f"warnings unchanged ({post_total})")
+        mem.save()
         return len(fixes), n_apply
 
     def run_pass(pass_no):
@@ -1153,6 +1188,7 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
                     opt_dir = os.path.join(rounds_root, f"optimize_p{pass_no}r{rnd}")
                     proposals = optimize_rtl_sync(
                         out_root, opt_dir, lint_counts=lints,
+                        memory_context=mem.format_fixer_context(),
                         concurrency=concurrency)
                     if proposals:
                         print(f"\n=== RTL OPTIMIZATION (pass {pass_no}) ===")
@@ -1225,6 +1261,18 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
                 "net_note": net_nt, "surprises": surprises,
                 "fixes_applied": fixes_applied}
 
+    # Set up memory tracking before the loop so apply_fixes can record attempts.
+    mem.set_metadata(scenario_dir=scen_dir, pack_path=cfg.get("pack_path"),
+                     stage=stage)
+    session_id = f"ready_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mem.record_run_start(out_root, command="ready", session_id=session_id)
+
+    if mem.has_been_processed():
+        ctx = mem.format_fixer_context()
+        if ctx:
+            print(f"[memory] loaded prior knowledge for '{design}' "
+                  f"({mem.run_count()} prior run(s))")
+
     print("=" * 70)
     print(f"[ready] RTL -> gate-level readiness (one command): {scen_dir}")
     print("=" * 70)
@@ -1233,7 +1281,6 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
     # RE-RUN with the updated rulebook -- repeating until the design comes out
     # clean OR it can no longer improve (a pass that applies no fix AND learns
     # nothing new == fixpoint; running again would only repeat itself).
-    design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
     pass_no = 0
     total_learned = 0
     promo = {"added": 0, "strengthened": 0}
@@ -1323,12 +1370,6 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
     print("=" * 70)
 
     # Record readiness gate results in per-design memory
-    mem = get_or_create(design)
-    mem.set_metadata(scenario_dir=scen_dir, pack_path=cfg.get("pack_path"),
-                     stage=stage)
-    session_id = f"ready_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    mem.record_run_start(out_root, command="ready", session_id=session_id)
-    # Record per-measurement findings from the final state
     for b in final_blockers:
         if b.measurement_key:
             mem.record_finding(b.measurement_key, b.measured,
@@ -1358,6 +1399,7 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
         rules_learned=learned_ids,
         surprises=surprises_list,
     )
+    mem.set_source_hash(src_hash)
 
     # ---- HUMAN-IN-THE-LOOP: apply changes to original source? ----
     if diffs:

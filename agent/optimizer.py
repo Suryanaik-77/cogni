@@ -65,7 +65,8 @@ def _slug(text: str) -> str:
     return s[:60] or "x"
 
 
-def _optimize_call(rel_path: str, content: str, lint_clean: dict) -> LLMCall:
+def _optimize_call(rel_path: str, content: str, lint_clean: dict,
+                    memory_context: str = "") -> LLMCall:
     prompt = """# Role: RTL Optimizer for Synthesis
 
 You are an RTL optimization expert preparing code for gate-level synthesis.
@@ -111,12 +112,16 @@ Read `inputs.json`. It contains:
   - `file_path`    : relative path of the RTL file
   - `file_content` : the lint-clean source to optimize
   - `lint_status`  : current Verilator lint counts (all zero)
+  - `memory`       : (optional) prior agent knowledge — past optimization
+                     attempts, what was accepted/rejected before.
 """
-    inputs = {
+    inputs: dict[str, Any] = {
         "file_path": rel_path,
         "file_content": content,
         "lint_status": lint_clean,
     }
+    if memory_context:
+        inputs["memory"] = memory_context
     return LLMCall(
         name=f"optimize.{_slug(rel_path)}",
         model=_llm.MODEL_OPUS,
@@ -146,6 +151,7 @@ def _read_output(call: LLMCall, run_dir: str) -> dict | None:
 
 async def optimize_rtl(rtl_root: str, run_dir: str, *,
                        lint_counts: dict,
+                       memory_context: str = "",
                        concurrency: int = 4) -> list[OptimizationProposal]:
     """Propose synthesis-friendly optimizations for each RTL file.
 
@@ -167,7 +173,7 @@ async def optimize_rtl(rtl_root: str, run_dir: str, *,
     if not files:
         return []
 
-    calls = [_optimize_call(rel, content, lint_counts)
+    calls = [_optimize_call(rel, content, lint_counts, memory_context)
              for rel, content in files.items()]
     briefs = [_write_brief(c, run_dir) for c in calls]
     print(f"[optimize] running {len(briefs)} optimization call(s)...", flush=True)

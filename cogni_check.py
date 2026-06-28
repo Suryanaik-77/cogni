@@ -43,6 +43,7 @@ from agent.sweep import sweep, SweepReport
 from agent.fixer import propose_fixes
 from agent.report import write_all
 from agent.core import WorldModel
+from agent.memory import get_or_create
 from agent import llm as _llm
 
 
@@ -405,6 +406,34 @@ def main():
     if paths["patches"]:
         print(f"[cogni-check] wrote {len(paths['patches'])} patch files under "
               f"{os.path.dirname(paths['patches'][0])}/")
+
+    # ---- Record in per-design memory ----
+    cfg = _scenario_config(args.scenario_dir)
+    design_id = (cfg.get("name")
+                 or (os.path.basename(os.path.normpath(args.scenario_dir))
+                     if args.scenario_dir else "unknown"))
+    mem = get_or_create(design_id)
+    mem.set_metadata(scenario_dir=args.scenario_dir, pack_path=pack_path,
+                     stage=args.stage)
+    session_id = f"check_{ts}"
+    mem.record_run_start(out_dir, command="cogni-check", session_id=session_id)
+    for rc in rep.results:
+        for ch in getattr(rc, "checks", []):
+            mkey = getattr(ch, "measurement_key", None)
+            mval = getattr(ch, "measured", None)
+            if mkey and mval is not None:
+                mem.record_finding(mkey, mval, session_id=session_id,
+                                   verdict=getattr(ch, "status", None))
+    mem.record_run_end(
+        session_id,
+        stats={
+            "n_violations": rep.n_violations,
+            "n_clean": rep.n_clean,
+            "n_skipped": rep.n_skipped,
+            "n_rules_total": rep.n_rules_total,
+            "n_fixes": sum(1 for f in fixes if f.patch_unified_diff),
+        },
+    )
 
 
 if __name__ == "__main__":

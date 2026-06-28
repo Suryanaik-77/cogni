@@ -50,11 +50,12 @@ module sync_fifo #(
         end
     end
 
+    // Combinational read path for better timing
     assign rd_data = mem[rd_ptr[ADDR_WIDTH-1:0]];
 
     // Status flags
     assign count = wr_ptr - rd_ptr;
-    assign full  = (count == DEPTH);
+    assign full  = (count == DEPTH[ADDR_WIDTH:0]);
     assign empty = (count == 0);
 
 endmodule

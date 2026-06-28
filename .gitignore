@@ -28,3 +28,6 @@ packs/**/*.json.bak
 
 # ready-gate working output (cleaned RTL copy, round artifacts)
 scenarios/**/ready_out/
+
+# Per-design memory (runtime state, not source)
+memory/designs/

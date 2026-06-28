@@ -54,6 +54,7 @@ from agent.llm.transports import (
     run_briefs_concurrently,
 )
 from run_scenario import (read_config, make_adapter, make_oracle, make_verdict)
+from agent.memory import DesignMemory, design_id_from_config, get_or_create
 
 # Default vendor models for direct-API verifier execution.
 # Test mode swaps gpt-5 -> gpt-5-mini to cut the ~70s verify floor.
@@ -209,6 +210,18 @@ def cmd_prepare(scenario_dirs: list[str]):
 
     _save_state(session_dir, "session", state)
     _save_pending(session_dir, "attention", all_attention_briefs)
+
+    # Record run start in per-design memory
+    for scen_name, scen in state["scenarios"].items():
+        cfg = scen.get("config", {})
+        mem = get_or_create(scen_name)
+        mem.set_metadata(
+            scenario_dir=scen.get("scenario_dir"),
+            pack_path=cfg.get("pack_path"),
+            stage=cfg.get("stage"),
+        )
+        mem.record_run_start(session_dir, command="run-all-api")
+
     return session_dir
 
 
@@ -218,6 +231,8 @@ def cmd_prepare(scenario_dirs: list[str]):
 
 def cmd_predict(session_dir: str):
     state = _load_state(session_dir, "session")
+    for scen_name in state.get("scenarios", {}):
+        get_or_create(scen_name).set_phase("predicting", session_dir=session_dir)
     predict_briefs = []
     for scen_name, scen in state["scenarios"].items():
         kb = KnowledgeBase.load(scen["kb_path"])
@@ -279,6 +294,8 @@ def cmd_predict(session_dir: str):
 
 def cmd_verify(session_dir: str):
     state = _load_state(session_dir, "session")
+    for scen_name in state.get("scenarios", {}):
+        get_or_create(scen_name).set_phase("verifying", session_dir=session_dir)
     verify_briefs = []
     for scen_name, scen in state["scenarios"].items():
         kb = KnowledgeBase.load(scen["kb_path"])
@@ -407,6 +424,8 @@ def cmd_verify_api(session_dir: str):
 
 def cmd_reflect(session_dir: str, verify: bool = True):
     state = _load_state(session_dir, "session")
+    for scen_name in state.get("scenarios", {}):
+        get_or_create(scen_name).set_phase("reflecting", session_dir=session_dir)
     reflect_briefs = []
 
     for scen_name, scen in state["scenarios"].items():
@@ -687,6 +706,72 @@ def cmd_finalize(session_dir: str):
     except Exception as exc:
         print(f"[finalize] metrics rollup failed (non-fatal): {exc}")
 
+    # ---- Update per-design memory ----
+    session_id = os.path.basename(os.path.normpath(session_dir))
+    for scen_name, scen_sum in summary.get("scenarios", {}).items():
+        mem = get_or_create(scen_name)
+        mem.set_phase("finalizing", session_dir=session_dir)
+
+        # Collect findings from verdicts
+        verdicts_path = os.path.join(session_dir, "verdicts.jsonl")
+        if os.path.exists(verdicts_path):
+            with open(verdicts_path, encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    vd = json.loads(line)
+                    if vd.get("scenario") != scen_name:
+                        continue
+                    notes = vd.get("notes", "")
+                    # Extract measurement from verdict notes (format: "[channel] key: actual=X, ...")
+                    if "actual=" in notes:
+                        for part in notes.split(";"):
+                            part = part.strip()
+                            if "actual=" not in part:
+                                continue
+                            key_part = part.split(":")[0].strip()
+                            # Strip channel prefix like "[intervals] "
+                            if "]" in key_part:
+                                key_part = key_part.split("]", 1)[1].strip()
+                            actual_str = part.split("actual=")[1].split(",")[0].strip()
+                            try:
+                                actual = float(actual_str)
+                            except ValueError:
+                                actual = actual_str
+                            mem.record_finding(
+                                key_part, actual,
+                                session_id=session_id,
+                                verdict=vd.get("kind"),
+                            )
+
+        # Collect rules learned from kb_edits
+        rules_learned = []
+        edits_path = os.path.join(session_dir, "kb_edits.jsonl")
+        if os.path.exists(edits_path):
+            with open(edits_path, encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    e = json.loads(line)
+                    if e.get("scenario") != scen_name:
+                        continue
+                    if e.get("kind") == "add" and e.get("new_rule", {}).get("id"):
+                        rules_learned.append(e["new_rule"]["id"])
+
+        cost = (summary.get("metrics") or {}).get("cost_usd", 0)
+        mem.record_run_end(
+            session_id,
+            stats={
+                "n_predicted": summary["totals"].get("n_predicted", 0),
+                "n_right": summary["totals"].get("n_right", 0),
+                "n_wrong": summary["totals"].get("n_wrong", 0),
+                "n_refused": summary["totals"].get("n_refused", 0),
+                "n_kb_edits": summary["totals"].get("n_kb_edits", 0),
+                "cost_usd": cost,
+            },
+            rules_learned=rules_learned,
+        )
+
     print(json.dumps(summary, indent=2, default=str))
     return summary
 
@@ -903,10 +988,11 @@ def _repoint_cfg(cfg: dict, orig_root: str, new_root: str) -> dict:
     return c
 
 
-def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
+def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
               fix: bool = True, netlist: bool = True, learn: bool = True,
+              optimize: bool = True, apply_to_source: bool = False,
               concurrency: int = 4) -> None:
-    """RTL -> gate-level readiness gate, with the REAL netlist step + learning.
+    """RTL -> gate-level readiness gate, with optimization + learning.
 
     One command, the whole loop. INNER loop (one pass):
       1. RTL gate   : sweep the RTL (live Verilator) -> GO/NO-GO, grouped by the
@@ -914,23 +1000,27 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
       2. fix        : (unless --no-fix) propose a fix per blocker, apply to a
                       WORKING COPY, re-measure. Repeat until RTL is clean,
                       stops progressing, or hits --max-rounds.
-      3. NETLIST gate: once RTL is clean, actually SYNTHESIZE with Yosys and
-                      check the real netlist for hazards that only appear in
-                      gates (inferred latch cells, multidriven nets).
+      3. OPTIMIZE   : (unless --no-optimize) once RTL is lint-clean, run the
+                      RTL optimizer to propose synthesis-friendly improvements.
+                      Re-verify with Verilator; reject any file that introduces
+                      new warnings. Only accepted optimizations survive.
+      4. NETLIST gate: actually SYNTHESIZE with Yosys and check the real netlist
+                      for hazards that only appear in gates. If netlist issues
+                      are found, loop back to step 1 (RTL fix).
 
     OUTER loop (--max-passes): after each pass, LEARN+promote the netlist
     surprises into the master pack, then RE-RUN the whole inner loop with the
     updated rulebook -- repeating until the design comes out clean OR it can no
     longer improve (a pass that applies no fix and learns nothing == fixpoint).
 
-    The original source is never touched; cleaned RTL + one `.patch` per changed
-    file land under <scenario>/ready_out/. If Yosys isn't installed the netlist
-    gate reports UNVERIFIED (never a false GO).
+    HUMAN-IN-THE-LOOP: at the end, if --apply is not set, the user is asked
+    whether to apply the changes to the original source files.
     """
     from agent.sweep import sweep
     from agent.fixer import propose_fixes_sync
-    from agent.fix_verify import (lint_counts, gather_rtl_files,
+    from agent.fix_verify import (lint_counts as lint_counts_fn, gather_rtl_files,
                                   synthesize_diffs, _write_fixed_file, _apply_patch)
+    from agent.optimizer import optimize_rtl_sync
     from agent import gate as gate_mod
     import shutil
 
@@ -959,13 +1049,26 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
     rounds_root = os.path.join(out_root, ".cogni_rounds")
     os.makedirs(rounds_root, exist_ok=True)
 
+    # Match the oracle's Verilator flags so fix verification sees the
+    # same warnings (LATCH, BLKSEQ, …) that the sweep does.
+    _vlint_extra = ["-Wall", "-Wno-fatal"]
+
+    def _vlint():
+        return lint_counts_fn(gather_rtl_files(out_root), top=top,
+                              extra_args=_vlint_extra)
+
     def measure_rtl():
         """Sweep the WORKING copy with live Verilator: (violations, lint)."""
         cfg2 = _repoint_cfg(cfg, orig_root, out_root)
+        # Drop any static findings file — the fix loop needs LIVE
+        # Verilator measurements from the working copy, not stale
+        # hardcoded counts from the original scenario.
+        if "oracle" in cfg2:
+            cfg2["oracle"].pop("findings_path", None)
         world = Perceiver(make_adapter(cfg2)).perceive([])
         reality = make_oracle(cfg2).from_existing()
         rep = sweep(pack, world, reality, stage_filter=stage)
-        return rep.violations(), lint_counts(gather_rtl_files(out_root), top=top)
+        return rep.violations(), _vlint()
 
     def run_synth():
         """Synthesize the working copy. (measurements|None, status, note)."""
@@ -982,22 +1085,57 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
         fixdir = os.path.join(rounds_root, f"round_{label}")
         fixes = propose_fixes_sync(rulechecks, fixdir, rtl_root=out_root,
                                    concurrency=concurrency)
+        conf_rank = {"likely": 0, "high": 0, "uncertain": 1,
+                     "medium": 1, "unlikely": 2, "low": 2}
+        fixes.sort(key=lambda f: conf_rank.get(f.confidence, 3))
+
+        baseline_total = sum(_vlint().values())
+
         n_apply = 0
+        touched: set[str] = set()
         for fx in fixes:
-            if fx.fixed_file and fx.target_file:
-                ok = _write_fixed_file(out_root, fx.target_file, fx.fixed_file)
+            tf = fx.target_file or ""
+            if tf in touched:
+                continue
+
+            dest = os.path.join(out_root, tf) if tf else ""
+            backup = None
+            if dest and os.path.exists(dest):
+                with open(dest, encoding="utf-8") as fh:
+                    backup = fh.read()
+
+            if fx.fixed_file and tf:
+                ok = _write_fixed_file(out_root, tf, fx.fixed_file)
             elif fx.patch_unified_diff:
                 ok = _apply_patch(out_root, fx.patch_unified_diff)
             else:
                 ok = False
-            n_apply += 1 if ok else 0
+
+            if not ok:
+                continue
+
+            post = _vlint()
+            post_total = sum(post.values())
+            if post_total < baseline_total:
+                n_apply += 1
+                touched.add(tf)
+                before = baseline_total
+                baseline_total = post_total
+                print(f"  [fix] ACCEPTED {tf} ({fx.rule_id}): "
+                      f"warnings {before} -> {post_total}")
+            else:
+                if backup is not None:
+                    with open(dest, "w", encoding="utf-8") as fh:
+                        fh.write(backup)
+                print(f"  [fix] REVERTED {tf} ({fx.rule_id}): "
+                      f"warnings unchanged ({post_total})")
         return len(fixes), n_apply
 
     def run_pass(pass_no):
         """One full inner loop: fix RTL + netlist blockers until the design is
         clean, stops progressing, or hits --max-rounds. Returns the end-state."""
         rnd = 0
-        prev_keys = None
+        prev_lint_total: int | None = None
         surprises: dict = {}
         rtl_b, net_b, net_st, net_nt = [], [], "not_run", ""
         fixes_applied = 0
@@ -1006,10 +1144,44 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
             rtl_b = gate_mod.classify(rtl_v)
             print(gate_mod.format_readiness(
                 rtl_b, lint=lints, title=f"RTL READINESS (pass {pass_no})",
-                round_no=(rnd or None), max_rounds=max_rounds))
+                round_no=(rnd or None), max_rounds=(max_rounds or None)))
 
             net_b, net_checks = [], []
             if netlist and not rtl_b:
+                # ---- OPTIMIZE before synthesis ----
+                if optimize:
+                    opt_dir = os.path.join(rounds_root, f"optimize_p{pass_no}r{rnd}")
+                    proposals = optimize_rtl_sync(
+                        out_root, opt_dir, lint_counts=lints,
+                        concurrency=concurrency)
+                    if proposals:
+                        print(f"\n=== RTL OPTIMIZATION (pass {pass_no}) ===")
+                        for prop in proposals:
+                            backup = prop.original_content
+                            dest = os.path.join(out_root, prop.target_file)
+                            with open(dest, "w", encoding="utf-8") as fh:
+                                fh.write(prop.optimized_content)
+                            post_lints = _vlint()
+                            new_warnings = sum(post_lints.values())
+                            if new_warnings > sum(lints.values()):
+                                # Reject: optimization introduced warnings
+                                with open(dest, "w", encoding="utf-8") as fh:
+                                    fh.write(backup)
+                                print(f"  REJECTED {prop.target_file}: "
+                                      f"introduced {new_warnings} warning(s) "
+                                      f"(was {sum(lints.values())}), reverted")
+                            else:
+                                lints = post_lints
+                                for cs in prop.changes_summary:
+                                    print(f"  ACCEPTED {prop.target_file}: {cs}")
+                        # Re-measure RTL after optimization to confirm still clean
+                        rtl_v, lints = measure_rtl()
+                        rtl_b = gate_mod.classify(rtl_v)
+                        if rtl_b:
+                            print("[optimize] optimization introduced RTL "
+                                  "blockers — looping back to fix...")
+                            continue
+
                 meas, net_st, net_nt = run_synth()
                 if net_st == "ok":
                     net_b = gate_mod.netlist_blockers(meas)
@@ -1033,23 +1205,22 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
             cur = rtl_b + net_b
             if not cur:
                 break
-            if not fix or rnd >= max_rounds:
+            if not fix:
                 break
-            # Progress is measured by WHICH blockers remain, not how many: a
-            # round that swaps one blocker for another (e.g. blkseq -> a latch
-            # the netlist surfaced) is real progress. Stop only when no blocker
-            # from last round was eliminated.
-            keys = frozenset((b.rule_id, b.measurement_key) for b in cur)
-            if prev_keys is not None and keys >= prev_keys:
-                print("[ready] no progress this round (same blockers persist) "
-                      "-- ending inner loop.")
+            if max_rounds and rnd >= max_rounds:
+                print(f"[ready] hit --max-rounds ({max_rounds}) -- stopping.")
                 break
-            prev_keys = keys
+            lint_total = sum(lints.values())
+            if prev_lint_total is not None and lint_total >= prev_lint_total:
+                print(f"[ready] no progress this round (warnings still "
+                      f"{lint_total}) -- ending inner loop.")
+                break
+            prev_lint_total = lint_total
             rnd += 1
             nprop, napp = apply_fixes(rtl_v + net_checks, f"p{pass_no}r{rnd}")
             fixes_applied += napp
             print(f"\n[ready] pass {pass_no} round {rnd}: proposed {nprop} "
-                  f"fix(es), applied {napp}")
+                  f"fix(es), {napp} verified by Verilator")
         return {"rtl": rtl_b, "net": net_b, "net_status": net_st,
                 "net_note": net_nt, "surprises": surprises,
                 "fixes_applied": fixes_applied}
@@ -1150,6 +1321,80 @@ def cmd_ready(args: list[str], *, max_rounds: int = 3, max_passes: int = 3,
             print(f"          - [{b.rule_id}] {b.measurement_key}={b.measured} "
                   f"-> {', '.join(b.downstream_stages) or 'rtl'}")
     print("=" * 70)
+
+    # Record readiness gate results in per-design memory
+    mem = get_or_create(design)
+    mem.set_metadata(scenario_dir=scen_dir, pack_path=cfg.get("pack_path"),
+                     stage=stage)
+    session_id = f"ready_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mem.record_run_start(out_root, command="ready", session_id=session_id)
+    # Record per-measurement findings from the final state
+    for b in final_blockers:
+        if b.measurement_key:
+            mem.record_finding(b.measurement_key, b.measured,
+                               session_id=session_id)
+    # Collect learned rule ids
+    learned_ids = []
+    learn_dir = os.path.join(out_root, ".learn", "kb_edits.jsonl")
+    if os.path.exists(learn_dir):
+        with open(learn_dir, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                e = json.loads(line)
+                if e.get("kind") == "add" and e.get("new_rule", {}).get("id"):
+                    learned_ids.append(e["new_rule"]["id"])
+    surprises_list = []
+    for s_vals in [res.get("surprises", {})]:
+        if isinstance(s_vals, dict):
+            surprises_list.extend(s_vals.values())
+    mem.record_run_end(
+        session_id,
+        stats={"passes": pass_no, "fixes_applied": sum(
+            1 for d in (diffs or {})
+        )},
+        readiness_verdict=final,
+        blockers_remaining=len(final_blockers),
+        rules_learned=learned_ids,
+        surprises=surprises_list,
+    )
+
+    # ---- HUMAN-IN-THE-LOOP: apply changes to original source? ----
+    if diffs:
+        do_apply = apply_to_source
+        if not do_apply:
+            print()
+            print("-" * 70)
+            print(f"  {len(diffs)} file(s) changed in the working copy:")
+            for rel in sorted(diffs):
+                print(f"    - {rel}")
+            print()
+            print("  Working copy : " + out_root)
+            print("  Original     : " + orig_root)
+            print("-" * 70)
+            try:
+                answer = input(
+                    "\n  Apply these changes to the ORIGINAL source files? [y/N] "
+                ).strip().lower()
+                do_apply = answer in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                print("\n  (no input) -- changes NOT applied.")
+                do_apply = False
+
+        if do_apply:
+            applied_count = 0
+            for rel in diffs:
+                src = os.path.join(out_root, rel)
+                dst = os.path.join(orig_root, rel)
+                if os.path.exists(src):
+                    shutil.copy2(src, dst)
+                    applied_count += 1
+            print(f"\n  APPLIED {applied_count} file(s) to {orig_root}")
+            mem.data["current_state"]["changes_applied"] = True
+            mem.save()
+        else:
+            print(f"\n  Changes NOT applied. Cleaned RTL is at: {out_root}")
+            print(f"  To apply later:  cp {out_root}/*.sv {orig_root}/")
 
 
 def cmd_run_all_api(args: list[str], concurrency: int = 8,
@@ -1282,6 +1527,43 @@ def cmd_run_all_api(args: list[str], concurrency: int = 8,
                 print(f"           {mark} {p['op']:<10} {p['rule_id']}  {p['detail']}")
 
 
+def cmd_memory(args: list[str], *, show_history: bool = False) -> None:
+    """Query per-design memory: what the agent has done before and current state.
+
+    Usage:
+      run_real.py memory                    # list all known designs
+      run_real.py memory buggy_demo         # summary for one design
+      run_real.py history buggy_demo        # full run history for one design
+    """
+    if not args:
+        designs = DesignMemory.list_designs()
+        if not designs:
+            print("[memory] no designs in memory yet. Run a scenario first.")
+            return
+        print(f"[memory] {len(designs)} design(s) in memory:\n")
+        for did in designs:
+            mem = DesignMemory.load(did)
+            d = mem.data
+            st = d["current_state"]
+            runs = d.get("total_runs", 0)
+            phase = st.get("phase", "idle")
+            rv = st.get("readiness_verdict")
+            rv_str = f"  verdict={rv}" if rv else ""
+            print(f"  {did:<25} runs={runs}  phase={phase}{rv_str}")
+        return
+
+    design_id = args[0]
+    mem = DesignMemory.load(design_id)
+    if not mem.has_been_processed():
+        print(f"[memory] no memory for design '{design_id}'.")
+        return
+
+    if show_history:
+        print(mem.format_history())
+    else:
+        print(mem.format_summary())
+
+
 if __name__ == "__main__":
     # RTL/question text contains UTF-8 (em-dashes etc.). Some shells expose a
     # latin-1 stdout, which makes print() crash on those chars. Force UTF-8 so
@@ -1295,7 +1577,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "predict", "verify", "verify-api",
                                       "reflect", "finalize", "run-all-api",
-                                      "promote", "ready"])
+                                      "promote", "ready", "memory", "history"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="Max concurrent API calls per stage (default 8)")
@@ -1326,8 +1608,8 @@ if __name__ == "__main__":
                          "live oracle the tool is ground truth and the panel is "
                          "informational only. Enable it for no-oracle judgment "
                          "questions or to scrutinize a prediction's reasoning.")
-    ap.add_argument("--max-rounds", type=int, default=3,
-                    help="ready: max auto-fix rounds within one pass (default 3).")
+    ap.add_argument("--max-rounds", type=int, default=0,
+                    help="ready: max auto-fix rounds per pass (0 = unlimited).")
     ap.add_argument("--max-passes", type=int, default=3,
                     help="ready: max outer passes -- after each pass it learns + "
                          "promotes, then re-runs the loop until clean or fixpoint "
@@ -1341,6 +1623,14 @@ if __name__ == "__main__":
     ap.add_argument("--no-learn", action="store_true",
                     help="ready: do not mint/promote rules from netlist "
                          "surprises (RTL clean but synthesis found a hazard).")
+    ap.add_argument("--no-optimize", action="store_true",
+                    help="ready: skip the RTL optimization step before "
+                         "synthesis. By default, once RTL is lint-clean the "
+                         "agent proposes synthesis-friendly improvements.")
+    ap.add_argument("--apply-to-source", action="store_true",
+                    help="ready: automatically apply changes to the original "
+                         "source files without asking. By default the agent "
+                         "asks the user interactively.")
     ns = ap.parse_args()
     if ns.test_mode and not is_test_mode():
         enable_test_mode()
@@ -1409,4 +1699,10 @@ if __name__ == "__main__":
     elif ns.cmd == "ready":
         cmd_ready(ns.args, max_rounds=ns.max_rounds, max_passes=ns.max_passes,
                   fix=not ns.no_fix, netlist=not ns.no_netlist,
-                  learn=not ns.no_learn, concurrency=ns.concurrency)
+                  learn=not ns.no_learn, optimize=not ns.no_optimize,
+                  apply_to_source=ns.apply_to_source,
+                  concurrency=ns.concurrency)
+    elif ns.cmd == "memory":
+        cmd_memory(ns.args)
+    elif ns.cmd == "history":
+        cmd_memory(ns.args, show_history=True)

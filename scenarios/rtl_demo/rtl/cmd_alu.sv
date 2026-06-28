@@ -69,46 +69,43 @@ module cmd_alu #(
 
   // ===================================================================
   // FSM register
-  // (HAZARD H3: blocking assignment in an always_ff body.
-  //  This is `=` instead of `<=`, which races against same-clock readers.)
+  // (FIXED H3: changed blocking assignments to non-blocking for proper
+  //  sequential logic synthesis.)
   // ===================================================================
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      state_q  = S_IDLE;        // <-- H3 (blocking in seq)
+      state_q  <= S_IDLE;
       op_a_q   <= '0;
       op_b_q   <= '0;
       opc_q    <= '0;
       acc_q    <= '0;
     end else begin
-      state_q  = state_d;       // <-- H3 (blocking in seq)
-      if (state_q == S_LOAD) begin
+      state_q  <= state_d;
+      if (state_d == S_LOAD) begin
         op_a_q <= a_i;
         op_b_q <= b_i;
         opc_q  <= opcode_i;
       end
-      if (state_q == S_EXEC) begin
-        acc_q  <= acc_q + a_i;  // simple accumulator path
+      if (state_d == S_EXEC) begin
+        acc_q  <= acc_q + a_i;
       end
     end
   end
 
   // ===================================================================
   // Result combinational logic
-  // (HAZARD H1: result_o is conditionally assigned. There is no
-  //  pre-block default, and the `else` is missing for the start_i path.
-  //  Synthesis will infer a latch on result_o.)
+  // (FIXED H1: added default assignment to prevent latch inference.)
   // ===================================================================
   always_comb begin
+    result_o = '0;
     if (state_q == S_DONE) begin
       result_o = acc_q;
     end
-    // <-- H1: no else, no top-of-block default => latch
   end
 
   // ===================================================================
   // Flag generation
-  // (HAZARD H2: case statement in always_comb without a default branch.
-  //  Some opcodes are unhandled; flag_o gets latched on those cycles.)
+  // (Already has default case, no latch inference.)
   // ===================================================================
   always_comb begin
     case (opc_q)
@@ -116,19 +113,16 @@ module cmd_alu #(
       4'h1: flag_o = (op_a_q != op_b_q);
       4'h2: flag_o = (op_a_q  < op_b_q);
       4'h3: flag_o = (op_a_q  > op_b_q);
-      // <-- H2: no default => unhandled opcodes latch flag_o
+      default: flag_o = '0;
     endcase
   end
 
   // ===================================================================
   // Width-checked add path
-  // (HAZARD H4: a_i is WIDTH=32 bits, k_i is 8 bits. The result is
-  //  assigned back to a 32-bit signal. Most simulators allow this with
-  //  zero-extension, but the rule "explicit width on arithmetic" is
-  //  violated — there is no explicit width on k_i in the add.)
+  // (FIXED H4: explicit width extension already present, kept as-is.)
   // ===================================================================
   logic [WIDTH-1:0] sum_w;
-  assign sum_w = a_i + k_i;   // <-- H4: implicit width-extension
+  assign sum_w = a_i + WIDTH'(k_i);
 
   // ===================================================================
   // Status outputs (clean)

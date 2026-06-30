@@ -75,10 +75,22 @@ def _verilator_oracle(cfg: dict[str, Any]):
     )
 
 
+def _vcs_oracle(cfg: dict[str, Any]):
+    from adapters.rtl.vcs.oracle import VCSRTLOracle
+    return VCSRTLOracle(
+        top=cfg.get("top"),
+        rtl_root=cfg.get("rtl_root"),
+        rtl_files=cfg.get("rtl_files"),
+        vcs_bin=cfg.get("vcs_bin", "vcs"),
+        vlogan_bin=cfg.get("vlogan_bin", "vlogan"),
+    )
+
+
 _REGISTRY: dict[tuple[str, str], tuple[Callable[..., Any], Callable[..., Any]]] = {
     # (stage, tool): (perceiver_factory, oracle_factory)
     ("synth", "yosys"):    (_yosys_perceiver,    _yosys_oracle),
     ("rtl",   "verilator"): (_verilator_perceiver, _verilator_oracle),
+    ("rtl",   "vcs"):       (_verilator_perceiver, _vcs_oracle),
 }
 
 

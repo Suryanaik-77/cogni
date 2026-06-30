@@ -1022,6 +1022,10 @@ def cmd_ready(args: list[str], *, max_rounds: int = 0, max_passes: int = 3,
                                   synthesize_diffs, _write_fixed_file, _apply_patch)
     from agent.optimizer import optimize_rtl_sync
     from agent import gate as gate_mod
+    from agent.rule_health import (RuleHealthStore, diagnose_remaining,
+                                   record_clean_rules, apply_corrections,
+                                   persist_pack, format_diagnoses,
+                                   format_corrections)
     import shutil
 
     if not args:
@@ -1606,6 +1610,391 @@ def cmd_memory(args: list[str], *, show_history: bool = False) -> None:
         print(mem.format_summary())
 
 
+def cmd_rules(args: list[str]) -> None:
+    """Rule management: list, inspect, validate, check RTL, show health.
+
+    Usage:
+      run_real.py rules                             # list rules in default pack
+      run_real.py rules packs/rtl/rules.json        # list rules in a specific pack
+      run_real.py rules show <rule_id>               # detail view of one rule
+      run_real.py rules check <scenario_dir>         # check RTL against rules (no fix)
+      run_real.py rules validate                     # validate rule format
+      run_real.py rules health                       # show rule health across runs
+    """
+    from agent.rule_health import (
+        RuleHealthStore, format_rule_detail, format_pack_summary,
+        validate_rule, diagnose_remaining, record_clean_rules,
+        apply_corrections, persist_pack, format_diagnoses,
+        format_corrections,
+    )
+
+    default_pack = "packs/rtl/rules.json"
+
+    def _load_pack(path=None):
+        p = path or default_pack
+        if not os.path.exists(p):
+            raise SystemExit(f"rules: pack not found: {p}")
+        with open(p) as f:
+            pack = json.load(f)
+        pack["__path__"] = p
+        return pack, p
+
+    # Parse subcommand
+    subcmd = args[0] if args else "list"
+
+    # ---- rules list [pack_path] ----
+    if subcmd == "list" or (subcmd and os.path.exists(subcmd)
+                            and subcmd.endswith(".json")):
+        pack_path = subcmd if subcmd != "list" else (args[1] if len(args) > 1 else None)
+        pack, pp = _load_pack(pack_path)
+        health = RuleHealthStore()
+        print(format_pack_summary(pack, pack_path=pp, health=health))
+        return
+
+    # ---- rules show <rule_id> [pack_path] ----
+    if subcmd == "show":
+        if len(args) < 2:
+            raise SystemExit("rules show: need a rule_id")
+        rule_id = args[1]
+        pack_path = args[2] if len(args) > 2 else None
+        pack, _ = _load_pack(pack_path)
+        health = RuleHealthStore()
+        rule = next((r for r in pack["rules"] if r["id"] == rule_id), None)
+        if not rule:
+            # Fuzzy match
+            matches = [r for r in pack["rules"] if rule_id in r["id"]]
+            if matches:
+                print(f"No exact match for '{rule_id}'. Did you mean:")
+                for m in matches:
+                    print(f"  {m['id']}")
+                return
+            raise SystemExit(f"rules show: rule '{rule_id}' not found in pack")
+        print(format_rule_detail(rule, health=health))
+        return
+
+    # ---- rules validate [pack_path] ----
+    if subcmd == "validate":
+        pack_path = args[1] if len(args) > 1 else None
+        pack, pp = _load_pack(pack_path)
+        key_index = pack.get("key_index", {})
+        total_problems = 0
+        for r in pack["rules"]:
+            if r.get("status") == "retired":
+                continue
+            problems = validate_rule(r, key_index)
+            if problems:
+                print(f"  {r['id']}:")
+                for p in problems:
+                    print(f"    - {p}")
+                total_problems += len(problems)
+        if total_problems == 0:
+            print(f"[validate] all {len(pack['rules'])} rules OK")
+        else:
+            print(f"\n[validate] {total_problems} problem(s) found")
+        return
+
+    # ---- rules check <scenario_dir> [pack_path] ----
+    if subcmd == "check":
+        if len(args) < 2:
+            raise SystemExit("rules check: need a scenario_dir (with RTL)")
+        scen_dir = args[1]
+        pack_path = args[2] if len(args) > 2 else None
+
+        cfg = read_config(os.path.join(scen_dir, "config.yaml"))
+        stage = cfg.get("stage", "rtl")
+        rtl_root = (cfg.get("oracle") or {}).get("rtl_root") or cfg.get("rtl_root")
+        if not rtl_root or not os.path.isdir(rtl_root):
+            raise SystemExit("rules check: need oracle.rtl_root in config")
+        top = (cfg.get("perceiver") or {}).get("top")
+        design = cfg.get("name") or os.path.basename(os.path.normpath(scen_dir))
+
+        if pack_path:
+            with open(pack_path) as f:
+                pack = json.load(f)
+            pack["__path__"] = pack_path
+        else:
+            with open(cfg["pack_path"]) as f:
+                pack = json.load(f)
+            pack["__path__"] = cfg["pack_path"]
+
+        from agent.sweep import sweep
+        from agent.perceiver import Perceiver
+        from agent.func_check import (run_functional_checks,
+                                      inject_measurements, format_results
+                                      as format_func_results)
+
+        world = Perceiver(make_adapter(cfg)).perceive([])
+        oracle = make_oracle(cfg)
+        reality = oracle.from_existing()
+
+        # Cross-validate with VCS if available (runs both tools)
+        import shutil
+        if stage == "rtl" and shutil.which("vcs"):
+            try:
+                from adapters.rtl.vcs.oracle import VCSRTLOracle
+                vcs_oracle = VCSRTLOracle(
+                    top=top, rtl_root=rtl_root,
+                    rtl_files=cfg.get("rtl_files"))
+                vcs_reality = vcs_oracle.from_live_lint()
+                vcs_counts = {k: v for k, v in vcs_reality.measurements.items()
+                              if isinstance(v, (int, float))
+                              and k != "vcs.lint.raw_classes"}
+                # Merge VCS findings: take the MAX of each shared key
+                # (if either tool flags it, it's a real issue)
+                for key, val in vcs_counts.items():
+                    old = reality.measurements.get(key)
+                    if old is None:
+                        reality.measurements[key] = val
+                    elif isinstance(old, (int, float)):
+                        reality.measurements[key] = max(old, val)
+                print(f"[vcs] cross-validated with VCS lint ({len(vcs_counts)} keys)")
+            except Exception as e:
+                print(f"[vcs] skipped: {e}")
+
+        # Run functional checks (pattern/SVA/protocol) and inject results
+        # into reality so the sweep can grade them alongside lint counts.
+        func_results = run_functional_checks(pack, rtl_root, top=top)
+        if func_results:
+            inject_measurements(func_results, reality)
+
+        report = sweep(pack, world, reality, stage_filter=stage)
+
+        health = RuleHealthStore()
+        record_clean_rules(health, report, design=design)
+
+        # Display results
+        if func_results:
+            print(format_func_results(func_results))
+            print()
+        print(f"=== RULE CHECK: {design} ({scen_dir}) ===")
+        print(f"  Rules total       : {report.n_rules_total}")
+        print(f"  Rules applicable  : {report.n_rules_applicable}")
+        print(f"  Clean             : {report.n_clean}")
+        print(f"  Violations        : {report.n_violations}")
+        print(f"  Skipped           : {report.n_skipped}")
+        print(f"  N/A               : {report.n_na}")
+        print()
+
+        if report.n_violations > 0:
+            print("VIOLATIONS:")
+            for rc in report.violations():
+                print(f"  [{rc.strength:>6}] {rc.rule_id}")
+                print(f"          {rc.statement[:80]}")
+                for ch in rc.checks:
+                    if ch.status == "violation":
+                        print(f"          {ch.measurement_key}: {ch.reason}")
+                print()
+
+            # Research each violation via LLM to determine: design bug
+            # or wrong rule?  Only suggests corrections when the LLM
+            # concludes (with reasoning) that the rule itself is wrong.
+            from agent.gate import classify as gate_classify
+            blockers = gate_classify(report.violations())
+
+            run_dir = os.path.join(scen_dir, "runs", "rule_diagnosis")
+            os.makedirs(run_dir, exist_ok=True)
+
+            print("\n[researching violations -- analyzing each rule against RTL best practices...]")
+            diagnoses = diagnose_remaining(
+                health, pack, blockers, design=design, run_dir=run_dir)
+
+            if diagnoses:
+                print(format_diagnoses(diagnoses))
+                print()
+                # Offer to apply corrections
+                try:
+                    answer = input("  Apply rule corrections? [y/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    answer = "n"
+                if answer in ("y", "yes"):
+                    corrections = apply_corrections(pack, diagnoses, health)
+                    if corrections:
+                        print(format_corrections(corrections))
+                        persist_pack(pack, pack["__path__"])
+                        print(f"  Pack updated: {pack['__path__']}")
+                    else:
+                        print("  No corrections applied.")
+            else:
+                print("\n[research complete] All violations are design bugs -- rules are correct.")
+
+        clean_rules = [rc for rc in report.rules if rc.status == "clean"]
+        if clean_rules:
+            print(f"CLEAN ({len(clean_rules)} rules passed):")
+            for rc in clean_rules[:10]:
+                keys = ", ".join(ch.measurement_key for ch in rc.checks if ch.measurement_key)
+                print(f"  [  OK  ] {rc.rule_id}  ({keys})")
+            if len(clean_rules) > 10:
+                print(f"  ... and {len(clean_rules) - 10} more")
+        return
+
+    # ---- rules health [pack_path] ----
+    if subcmd == "health":
+        health = RuleHealthStore()
+        if not health.data.get("rules"):
+            print("[health] no rule health data yet. Run 'rules check' on some designs first.")
+            return
+        pack_path = args[1] if len(args) > 1 else None
+        pack, pp = _load_pack(pack_path)
+
+        print(f"=== RULE HEALTH ({pp}) ===")
+        print(f"  Rules tracked: {len(health.data['rules'])}")
+        print(f"  Corrections applied: {len(health.data.get('corrections', []))}")
+        print()
+
+        # Sort by accuracy (worst first)
+        scored = []
+        for rule_id, r in health.data["rules"].items():
+            acc = health.accuracy(rule_id)
+            scored.append((rule_id, r, acc))
+        scored.sort(key=lambda x: (x[2] if x[2] is not None else 1.0))
+
+        print(f"  {'RULE ID':<45} {'EVALS':>5} {'RIGHT':>5} {'WRONG':>5} {'ACCURACY':>8}")
+        print("  " + "-" * 75)
+        for rule_id, r, acc in scored:
+            acc_str = f"{acc:.0%}" if acc is not None else "n/a"
+            print(f"  {rule_id:<45} {r['evaluations']:>5} "
+                  f"{r['correct']:>5} {r['wrong']:>5} {acc_str:>8}")
+
+        # Show recent corrections
+        corrections = health.data.get("corrections", [])
+        if corrections:
+            print(f"\nRecent corrections:")
+            for c in corrections[-10:]:
+                print(f"  [{c.get('recommendation', '?'):>10}] {c['rule_id']} "
+                      f"— {c.get('detail', '')[:60]}")
+        return
+
+    if subcmd == "enhance":
+        from agent.rule_enhance import (find_gaps, format_gaps,
+                                        enhance_rules_sync,
+                                        format_enhancements)
+        pack_path_e = args[1] if len(args) > 1 else None
+        if not pack_path_e:
+            for candidate in ["packs/rtl/rules.json",
+                               "packs/default/rules.json"]:
+                if os.path.exists(candidate):
+                    pack_path_e = candidate
+                    break
+        if not pack_path_e:
+            print("No pack found. Specify a pack path.")
+            return
+        with open(pack_path_e) as f:
+            pack = json.load(f)
+
+        gaps = find_gaps(pack)
+        print(format_gaps(gaps))
+
+        if not gaps:
+            return
+
+        max_rules = 10
+        if len(args) > 2:
+            try:
+                max_rules = int(args[2])
+            except ValueError:
+                pass
+
+        run_dir = os.path.join("runs", "enhance_latest")
+        enhancements = enhance_rules_sync(
+            pack, run_dir, max_rules=max_rules)
+
+        print(format_enhancements(enhancements))
+
+        applied = [e for e in enhancements
+                   if any([e.added_violating, e.added_compliant,
+                           e.improved_statement, e.added_rationale,
+                           e.added_predicts, e.added_prevents])]
+        if applied:
+            persist_pack(pack, pack_path_e)
+            print(f"\nPack saved to {pack_path_e} "
+                  f"({len(applied)} rule(s) updated)")
+        return
+
+    # ---- rules auto [pack_path] [--no-generate] [--max-rounds N] ----
+    if subcmd == "auto":
+        from agent.rule_enhance import (
+            auto_loop_sync, format_auto_report, find_gaps,
+            cross_validate,
+        )
+        pack_path_a = None
+        max_rounds = 5
+        do_generate = True
+        for a in args[1:]:
+            if a == "no-generate":
+                do_generate = False
+            elif a.endswith(".json"):
+                pack_path_a = a
+            else:
+                try:
+                    max_rounds = int(a)
+                except ValueError:
+                    pass
+        if not pack_path_a:
+            for candidate in ["packs/rtl/rules.json",
+                               "packs/default/rules.json"]:
+                if os.path.exists(candidate):
+                    pack_path_a = candidate
+                    break
+        if not pack_path_a:
+            print("No pack found. Specify a pack path.")
+            return
+
+        with open(pack_path_a) as f:
+            pack = json.load(f)
+
+        initial_gaps = len(find_gaps(pack))
+        initial_rules = len([r for r in pack.get("rules", [])
+                             if r.get("status") != "retired"])
+        initial_issues = len(cross_validate(pack))
+
+        print(f"=== AUTONOMOUS RULES LOOP ===")
+        print(f"  Pack          : {pack_path_a}")
+        print(f"  Rules (active): {initial_rules}")
+        print(f"  Gaps          : {initial_gaps}")
+        print(f"  Issues        : {initial_issues}")
+        print(f"  Max rounds    : {max_rounds}")
+        print(f"  Generate new  : {'yes' if do_generate else 'no'}")
+
+        run_dir = os.path.join("runs", "auto_latest")
+        report = auto_loop_sync(
+            pack, run_dir,
+            max_rounds=max_rounds,
+            do_generate=do_generate,
+        )
+
+        print(format_auto_report(report))
+
+        # Summarize changes before asking for permission
+        final_rules = len([r for r in pack.get("rules", [])
+                           if r.get("status") != "retired"])
+        changes = (report.total_enhanced + report.total_generated
+                   + report.total_retired)
+        if changes == 0:
+            print("\nNo changes to apply.")
+            return
+
+        print(f"\nSummary of changes:")
+        print(f"  Rules: {initial_rules} -> {final_rules} "
+              f"(+{report.total_generated}, -{report.total_retired})")
+        print(f"  Enhanced: {report.total_enhanced}")
+        print(f"  Gaps: {initial_gaps} -> {report.final_gaps}")
+
+        try:
+            answer = input("\n  Save all changes to pack? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+
+        if answer in ("y", "yes"):
+            persist_pack(pack, pack_path_a)
+            print(f"  Pack saved: {pack_path_a}")
+        else:
+            print("  Changes discarded.")
+        return
+
+    print(f"Unknown rules subcommand: {subcmd}")
+    print("Usage: rules [list|show|check|validate|enhance|auto|health] ...")
+
+
 if __name__ == "__main__":
     # RTL/question text contains UTF-8 (em-dashes etc.). Some shells expose a
     # latin-1 stdout, which makes print() crash on those chars. Force UTF-8 so
@@ -1619,7 +2008,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "predict", "verify", "verify-api",
                                       "reflect", "finalize", "run-all-api",
-                                      "promote", "ready", "memory", "history"])
+                                      "promote", "ready", "memory", "history",
+                                      "rules"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="Max concurrent API calls per stage (default 8)")
@@ -1748,3 +2138,5 @@ if __name__ == "__main__":
         cmd_memory(ns.args)
     elif ns.cmd == "history":
         cmd_memory(ns.args, show_history=True)
+    elif ns.cmd == "rules":
+        cmd_rules(ns.args)

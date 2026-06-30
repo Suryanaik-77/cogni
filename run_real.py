@@ -1739,8 +1739,6 @@ def cmd_rules(args: list[str]) -> None:
                 vcs_counts = {k: v for k, v in vcs_reality.measurements.items()
                               if isinstance(v, (int, float))
                               and k != "vcs.lint.raw_classes"}
-                # Merge VCS findings: take the MAX of each shared key
-                # (if either tool flags it, it's a real issue)
                 for key, val in vcs_counts.items():
                     old = reality.measurements.get(key)
                     if old is None:
@@ -1750,6 +1748,30 @@ def cmd_rules(args: list[str]) -> None:
                 print(f"[vcs] cross-validated with VCS lint ({len(vcs_counts)} keys)")
             except Exception as e:
                 print(f"[vcs] skipped: {e}")
+
+        # Cross-validate with Cogni RTL Analyzer (pure Python, no license)
+        if stage == "rtl":
+            try:
+                from agent.rtl_analyzer import analyze_design
+                rtl_files_list = cfg.get("rtl_files") or [
+                    os.path.join(rtl_root, f) for f in os.listdir(rtl_root)
+                    if f.endswith((".sv", ".v", ".svh"))]
+                cogni_result = analyze_design(rtl_files_list)
+                cogni_counts = {k: v for k, v in cogni_result.measurements.items()
+                                if isinstance(v, (int, float))}
+                for key, val in cogni_counts.items():
+                    old = reality.measurements.get(key)
+                    if old is None:
+                        reality.measurements[key] = val
+                    elif isinstance(old, (int, float)):
+                        reality.measurements[key] = max(old, val)
+                print(f"[cogni] RTL analyzer: {cogni_result.measurements.get('cogni.lint.total_issues', 0)} findings")
+                if cogni_result.predictions:
+                    for p in cogni_result.predictions:
+                        icon = {"high": "!!", "medium": "!", "low": "~"}.get(p.confidence, "?")
+                        print(f"  [{icon}] {p.category}: {p.prediction}")
+            except Exception as e:
+                print(f"[cogni] analyzer skipped: {e}")
 
         # Run functional checks (pattern/SVA/protocol) and inject results
         # into reality so the sweep can grade them alongside lint counts.

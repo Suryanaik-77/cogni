@@ -1,0 +1,108 @@
+{
+  "waivers": [
+    {
+      "rule": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "line": 13,
+      "reason": "This is a standard free-running up counter. Wrap-around on overflow is the intended and expected behavior for a simple up_counter module. There is no downstream FSM, comparison, or logic in this module that would be broken by wrap-around. The warning may be appropriate in a larger context where the counter drives FSM transitions or comparisons, but flagging the counter increment itself as a risk in isolation is a false positive for a module whose sole purpose is to count.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 15,
+      "reason": "Missing endmodule label is a style/cosmetic issue only. It has zero functional or synthesis impact. This is informational at best and should not be treated as a finding requiring action in a lint flow focused on functional correctness.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "line": 13,
+      "reason": "This is a standard free-running up counter by design. The module is named 'up_counter' and contains no downstream logic that would be broken by wrap-around. Wrap-around is the intended behavior for a generic counter primitive. The static finding was already covered by the waived rule LEARNED_COUNTER_WIDTH_OVERFLOW_RISK for the same line and same reason. Flagging this as an info finding on a generic utility counter with no comparison logic or FSM dependencies in scope is a false positive \u2014 there is nothing functionally wrong.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 9,
+      "reason": "This is a valid false positive flag in principle, but marking it as a false positive because the rule targets a style/documentation concern rather than a functional bug. The synchronous reset pattern (rst checked inside always_ff @(posedge clk) with no rst in the sensitivity list) is a completely standard and correct RTL idiom in SystemVerilog. The always_ff sensitivity list in SV implicitly covers all signals needed for correct simulation \u2014 the absence of rst in the sensitivity list is not a bug. Whether synchronous or asynchronous reset is 'intended' is a design choice, not an error. Flagging well-formed synchronous reset as undocumented is a style/cosmetic concern equivalent to the already-waived STYLE_endmod_label finding and should be treated similarly.",
+      "file_pattern": "",
+      "message_pattern": ""
+    }
+  ],
+  "learned_rules": [
+    {
+      "name": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "description": "Detect counters that increment without saturation logic or overflow detection when WIDTH is a parameter, ensuring downstream logic accounts for wrap-around.",
+      "rationale": "Parameterized counters that silently wrap (e.g., 8-bit counter rolls from 255 to 0) can cause subtle functional bugs if consuming logic assumes monotonic growth or checks for a terminal count that may never be reached.",
+      "check_type": "regex",
+      "pattern": "count\\s*<=\\s*count\\s*\\+\\s*1",
+      "severity": "warning",
+      "message": "Detect counters that increment without saturation logic or overflow detection when WIDTH is a parameter, ensuring downstream logic accounts for wrap-around."
+    },
+    {
+      "name": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
+      "description": "Detect when a parameterized counter's output is compared to a constant or parameter value (e.g., count == MAX_VAL or count >= THRESHOLD) without saturation or overflow guard logic. If WIDTH allows count to wrap before reaching the comparison target, the comparison may never be true.",
+      "rationale": "A free-running counter that wraps is safe in isolation, but when its value is compared against a bound (e.g., to trigger a state transition or done signal), wrap-around can cause the comparison to be permanently skipped if the target value equals or exceeds 2^WIDTH. This is a frequent source of FSM lockup bugs.",
+      "check_type": "regex",
+      "pattern": "count\\s*==\\s*[A-Za-z0-9_]+|count\\s*>=\\s*[A-Za-z0-9_]+",
+      "severity": "warning",
+      "message": "Detect when a parameterized counter's output is compared to a constant or parameter value (e.g., count == MAX_VAL or count >= THRESHOLD) without saturation or overflow guard logic. If WIDTH allows count to wrap before reaching the comparison target, the comparison may never be true."
+    },
+    {
+      "name": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "description": "Detect parameterized counters that increment unconditionally (when enabled) and have no explicit saturation assignment (e.g., count <= MAX or count <= '1) and no comparison to a maximum value that would stop or reset the counter before wrap.",
+      "rationale": "When WIDTH is a parameter, the designer may intend the counter to stop at a specific value but forget to add saturation logic. This is different from intentional free-running counters and is a common integration bug when WIDTH is changed.",
+      "check_type": "regex",
+      "pattern": "count\\s*<=\\s*count\\s*\\+",
+      "severity": "info",
+      "message": "Detect parameterized counters that increment unconditionally (when enabled) and have no explicit saturation assignment (e.g., count <= MAX or count <= '1) and no comparison to a maximum value that would stop or reset the counter before wrap."
+    },
+    {
+      "name": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "description": "Detect always_ff blocks that use synchronous reset (rst checked inside the block body with no rst in the sensitivity list) without a comment indicating that synchronous reset is intentional.",
+      "rationale": "Synchronous vs asynchronous reset is a common source of design bugs and mismatches between RTL and intent. A generic counter or any sequential element missing an explicit comment or coding convention marker for reset type can cause subtle initialization failures in simulation and silicon.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@\\s*\\(posedge\\s+clk\\s*\\)[^;]*if\\s*\\(\\s*rst\\s*\\)",
+      "severity": "warning",
+      "message": "Detect always_ff blocks that use synchronous reset (rst checked inside the block body with no rst in the sensitivity list) without a comment indicating that synchronous reset is intentional."
+    }
+  ],
+  "review_history": [
+    {
+      "files": [
+        "up_counter.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 0,
+      "fsm_consequences": 0,
+      "rules_learned": 1
+    },
+    {
+      "files": [
+        "up_counter.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 0,
+      "fsm_consequences": 0,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "up_counter.sv"
+      ],
+      "fp_removed": 1,
+      "missing_found": 1,
+      "fsm_consequences": 0,
+      "rules_learned": 1
+    },
+    {
+      "files": [
+        "up_counter.sv"
+      ],
+      "fp_removed": 1,
+      "missing_found": 0,
+      "fsm_consequences": 0,
+      "rules_learned": 0
+    }
+  ]
+}

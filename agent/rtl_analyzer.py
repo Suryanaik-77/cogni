@@ -24,6 +24,7 @@ Rule categories (modeled after SpyGlass 293-rule set):
 """
 from __future__ import annotations
 
+import json as _json
 import math
 import os
 import re
@@ -35,6 +36,80 @@ import tree_sitter as ts
 
 _SV_LANG = ts.Language(tsv.language())
 _PARSER = ts.Parser(_SV_LANG)
+
+_KNOWLEDGE_FILE = os.path.join(os.path.dirname(__file__), "cogni_knowledge.json")
+
+
+def _load_knowledge() -> dict:
+    if os.path.isfile(_KNOWLEDGE_FILE):
+        with open(_KNOWLEDGE_FILE, encoding="utf-8") as f:
+            return _json.load(f)
+    return {"waivers": [], "learned_rules": [], "review_history": []}
+
+
+def _save_knowledge(kb: dict) -> None:
+    with open(_KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
+        _json.dump(kb, f, indent=2)
+
+
+def _apply_waivers(findings: list[Finding]) -> list[Finding]:
+    kb = _load_knowledge()
+    waivers = kb.get("waivers", [])
+    if not waivers:
+        return findings
+    out = []
+    for f in findings:
+        suppressed = False
+        for w in waivers:
+            rule_match = (not w.get("rule") or w["rule"] == f.rule)
+            file_match = (not w.get("file_pattern")
+                          or re.search(w["file_pattern"], f.file))
+            line_match = (not w.get("line") or w["line"] == f.line)
+            msg_match = (not w.get("message_pattern")
+                         or re.search(w["message_pattern"], f.message))
+            if rule_match and file_match and line_match and msg_match:
+                suppressed = True
+                break
+        if not suppressed:
+            out.append(f)
+    return out
+
+
+def _run_learned_rules(tree, filename: str,
+                       signals: dict) -> list[Finding]:
+    kb = _load_knowledge()
+    findings = []
+    for rule in kb.get("learned_rules", []):
+        name = rule.get("name", "LEARNED_unknown")
+        pattern = rule.get("pattern", "")
+        severity = rule.get("severity", "warning")
+        message_tpl = rule.get("message", "")
+        check_type = rule.get("check_type", "regex")
+
+        if not pattern:
+            continue
+
+        if check_type == "regex":
+            root = tree.root_node
+            src_text = root.text.decode("utf-8", errors="replace")
+            for m in re.finditer(pattern, src_text):
+                line = src_text[:m.start()].count("\n") + 1
+                findings.append(Finding(
+                    rule=name, severity=severity, file=filename,
+                    line=line,
+                    message=message_tpl or f"Learned rule '{name}' matched",
+                    synth_impact=rule.get("rationale", ""),
+                ))
+        elif check_type == "ast_node":
+            from agent.rtl_analyzer import _find_nodes
+            for node in _find_nodes(tree.root_node, pattern):
+                findings.append(Finding(
+                    rule=name, severity=severity, file=filename,
+                    line=node.start_point[0] + 1,
+                    message=message_tpl or f"Learned rule '{name}' matched",
+                    synth_impact=rule.get("rationale", ""),
+                ))
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -2572,10 +2647,12 @@ def W497_undriven_net(tree, file, signals):
 
 
 def W362_output_partial(tree, file, signals):
-    """W362: Output not driven on all conditional paths."""
+    """W362: Output not driven on all conditional paths (comb only)."""
     findings = []
     output_sigs = {n for n, s in signals.items() if s.direction == 'output'}
     for always in _find_nodes(tree.root_node, 'always_construct'):
+        if _always_type(always) == 'always_ff':
+            continue
         driven_in_block = set()
         for ntype in ('blocking_assignment', 'nonblocking_assignment'):
             for n in _find_nodes(always, ntype):
@@ -5026,7 +5103,14 @@ def analyze_design(rtl_files: list[str]) -> AnalysisResult:
                     findings.extend(check(tree, fname, signals))
                 except Exception:
                     pass
+            try:
+                findings.extend(_run_learned_rules(tree, fname, signals))
+            except Exception:
+                pass
             result.findings.extend(_deduplicate_findings(findings))
+
+    # Apply persistent waivers (FPs confirmed by agent in prior runs)
+    result.findings = _apply_waivers(result.findings)
 
     # Phase 2b: Cross-module elaboration (when multiple files)
     elab_measurements = {}
@@ -5168,6 +5252,7 @@ class SynthesisEstimator:
 
     def estimate(self) -> dict:
         root = self.tree.root_node
+        self._optimize(root)
         self._scan_registers(root)
         self._scan_combinational(root)
         self._scan_operators(root)
@@ -5181,6 +5266,169 @@ class SynthesisEstimator:
         if s and s.width > 0:
             return s.width
         return 1
+
+    # --- Optimization passes ---
+
+    def _optimize(self, root):
+        """Constant propagation + dead code elimination before gate counting."""
+        self._dead_ranges = []
+        self._constant_signals = {}
+        self._const_outputs = set()
+        self._optimizations = []
+
+        self._params = {}
+        for name, sig in self.signals.items():
+            if getattr(sig, 'is_param', False) and sig.param_value is not None:
+                self._params[name] = sig.param_value
+
+        if not self._params:
+            return
+
+        for always in _find_nodes(root, 'always_construct'):
+            if _always_type(always) != 'always_comb':
+                continue
+            self._const_prop_conds(always)
+
+        for ca in _find_nodes(root, 'continuous_assign'):
+            self._const_prop_conds(ca)
+
+        for name, val in self._constant_signals.items():
+            sig = self.signals.get(name)
+            if sig and getattr(sig, 'direction', '') == 'output':
+                self._const_outputs.add(name)
+
+    def _const_prop_conds(self, block):
+        """Find constant-controlled branches and mark dead code."""
+        for cond in _find_nodes(block, 'conditional_statement'):
+            if self._is_dead(cond):
+                continue
+            nc = cond.named_children
+            if not nc or nc[0].type != 'cond_predicate':
+                continue
+            cond_node = nc[0]
+            val = self._eval_const_expr(cond_node)
+            if val is None:
+                continue
+
+            true_branch = nc[1] if len(nc) >= 2 else None
+            false_branch = nc[2] if len(nc) >= 3 else None
+            expr_text = _node_text(cond_node)
+            line = _node_line(cond)
+
+            if val:
+                if false_branch:
+                    self._dead_ranges.append(
+                        (false_branch.start_byte, false_branch.end_byte))
+                    self._optimizations.append({
+                        'type': 'const_prop', 'line': line,
+                        'detail': '%s always TRUE — else branch eliminated'
+                                  % expr_text,
+                    })
+                surviving = true_branch
+            else:
+                if true_branch:
+                    self._dead_ranges.append(
+                        (true_branch.start_byte, true_branch.end_byte))
+                    self._optimizations.append({
+                        'type': 'const_prop', 'line': line,
+                        'detail': '%s always FALSE — if branch eliminated'
+                                  % expr_text,
+                    })
+                surviving = false_branch
+
+            if surviving:
+                self._extract_const_assignments(surviving)
+
+    def _extract_const_assignments(self, node):
+        """Track signals assigned constant values in surviving branches."""
+        for asgn in (_find_nodes(node, 'blocking_assignment')
+                     + _find_nodes(node, 'nonblocking_assignment')):
+            lhs = _get_lhs_signal(asgn)
+            if not lhs:
+                continue
+            oa = _find_nodes(asgn, 'operator_assignment')
+            target = oa[0] if oa else asgn
+            children = target.named_children
+            if len(children) >= 2:
+                rhs = children[-1]
+                rhs_val = self._eval_const_expr(rhs)
+                if rhs_val is not None:
+                    self._constant_signals[lhs] = rhs_val
+
+    def _eval_const_expr(self, node):
+        """Evaluate AST expression to a constant integer, or None."""
+        if node is None:
+            return None
+        text = _node_text(node).strip()
+
+        if node.type == 'simple_identifier':
+            if text in self._params:
+                return self._params[text]
+            return self._constant_signals.get(text)
+
+        if node.type in ('integral_number', 'primary_literal', 'number'):
+            m = re.match(r"(\d+)'([bdho])([0-9a-fA-F_]+)", text)
+            if m:
+                base_map = {'b': 2, 'd': 10, 'h': 16, 'o': 8}
+                val_str = m.group(3).replace('_', '')
+                try:
+                    return int(val_str, base_map.get(m.group(2), 10))
+                except ValueError:
+                    return None
+            try:
+                return int(text)
+            except ValueError:
+                return None
+
+        nc = node.named_children
+        # Unary: [operator, operand]
+        if len(nc) == 2 and nc[0].type == 'unary_operator':
+            op = _node_text(nc[0])
+            v = self._eval_const_expr(nc[1])
+            if v is not None:
+                if op == '!':
+                    return 0 if v else 1
+                if op == '~':
+                    return ~v & 0xFFFFFFFF
+            return None
+
+        # Binary: [lhs, operator, rhs]
+        if len(nc) == 3 and nc[1].type == 'binary_operator':
+            left = self._eval_const_expr(nc[0])
+            right = self._eval_const_expr(nc[2])
+            if left is not None and right is not None:
+                op = _node_text(nc[1])
+                ops = {'+': lambda a, b: a + b,
+                       '-': lambda a, b: a - b,
+                       '*': lambda a, b: a * b,
+                       '==': lambda a, b: 1 if a == b else 0,
+                       '!=': lambda a, b: 1 if a != b else 0,
+                       '<': lambda a, b: 1 if a < b else 0,
+                       '>': lambda a, b: 1 if a > b else 0,
+                       '<=': lambda a, b: 1 if a <= b else 0,
+                       '>=': lambda a, b: 1 if a >= b else 0,
+                       '&': lambda a, b: a & b,
+                       '|': lambda a, b: a | b,
+                       '^': lambda a, b: a ^ b,
+                       '&&': lambda a, b: 1 if (a and b) else 0,
+                       '||': lambda a, b: 1 if (a or b) else 0}
+                fn = ops.get(op)
+                if fn:
+                    return fn(left, right)
+            return None
+
+        # Recurse into single-child wrappers
+        if len(nc) == 1:
+            return self._eval_const_expr(nc[0])
+
+        return None
+
+    def _is_dead(self, node):
+        """Check if node is inside a dead (optimized-away) code region."""
+        for start, end in self._dead_ranges:
+            if node.start_byte >= start and node.end_byte <= end:
+                return True
+        return False
 
     def _scan_registers(self, root):
         """Count flip-flop bits from always_ff assignments."""
@@ -5207,18 +5455,32 @@ class SynthesisEstimator:
         for always in _find_nodes(root, 'always_construct'):
             if _always_type(always) != 'always_comb':
                 continue
+            if self._is_dead(always):
+                continue
             self._count_muxes(always)
             self._measure_comb_depth(always, 0)
 
         for ca in _find_nodes(root, 'continuous_assign'):
+            if self._is_dead(ca):
+                continue
             self._count_muxes(ca)
 
     def _count_muxes(self, node):
         """Each if/else = 1 mux per assigned bit; each case arm contributes."""
         for cond in _find_nodes(node, 'conditional_statement'):
+            if self._is_dead(cond):
+                continue
+            # If condition is constant, no mux needed
+            nc = cond.named_children
+            if nc and nc[0].type == 'cond_predicate':
+                val = self._eval_const_expr(nc[0])
+                if val is not None:
+                    continue
             assigned = set()
             for asgn in (_find_nodes(cond, 'blocking_assignment')
                          + _find_nodes(cond, 'nonblocking_assignment')):
+                if self._is_dead(asgn):
+                    continue
                 lhs = _get_lhs_signal(asgn)
                 if lhs:
                     assigned.add(lhs)
@@ -5226,16 +5488,19 @@ class SynthesisEstimator:
                 self.mux_bits += self._sig_width(sig)
 
         for case in _find_nodes(node, 'case_statement'):
+            if self._is_dead(case):
+                continue
             arms = _find_nodes(case, 'case_item')
             n_arms = max(len(arms), 2)
             assigned = set()
             for asgn in (_find_nodes(case, 'blocking_assignment')
                          + _find_nodes(case, 'nonblocking_assignment')):
+                if self._is_dead(asgn):
+                    continue
                 lhs = _get_lhs_signal(asgn)
                 if lhs:
                     assigned.add(lhs)
             for sig in assigned:
-                # N:1 mux = (N-1) 2:1 muxes
                 self.mux_bits += self._sig_width(sig) * (n_arms - 1)
 
     def _measure_comb_depth(self, node, depth, _visited=None):
@@ -5250,11 +5515,25 @@ class SynthesisEstimator:
 
         # Find direct-child conditionals (not self)
         for child in node.children:
+            if self._is_dead(child):
+                continue
             if child.type == 'conditional_statement':
+                # Skip constant-controlled conditionals (no mux needed)
+                nc = child.named_children
+                if nc and nc[0].type == 'cond_predicate':
+                    val = self._eval_const_expr(nc[0])
+                    if val is not None:
+                        # Only measure the surviving branch
+                        surviving = nc[1] if val else (nc[2] if len(nc) >= 3 else None)
+                        if surviving:
+                            self._measure_comb_depth(surviving, depth, _visited)
+                        continue
                 new_depth = depth + 1
                 assigned = set()
                 for asgn in (_find_nodes(child, 'blocking_assignment')
                              + _find_nodes(child, 'nonblocking_assignment')):
+                    if self._is_dead(asgn):
+                        continue
                     lhs = _get_lhs_signal(asgn)
                     if lhs:
                         assigned.add(lhs)
@@ -5284,6 +5563,8 @@ class SynthesisEstimator:
         """Count arithmetic, comparison, and logic operators."""
         bin_ops = _find_nodes(root, 'binary_operator')
         for op_node in bin_ops:
+            if self._is_dead(op_node):
+                continue
             op_text = _node_text(op_node)
             parent = op_node.parent
             if not parent:
@@ -5321,6 +5602,8 @@ class SynthesisEstimator:
 
         unary_ops = _find_nodes(root, 'unary_operator')
         for op_node in unary_ops:
+            if self._is_dead(op_node):
+                continue
             op_text = _node_text(op_node)
             if op_text in ('~', '!'):
                 self.logic_gates += 1
@@ -5429,10 +5712,17 @@ class SynthesisEstimator:
         if self.comparators:
             arith_delay += _DELAY_COMP
 
-        critical_path_ns = _DELAY_FF_CKQ + comb_delay + arith_delay + _DELAY_FF_SETUP
+        # Only add FF overhead if there are actual FFs or comb logic
+        if ff_bits > 0 and (total_comb > 0 or arith_delay > 0):
+            critical_path_ns = _DELAY_FF_CKQ + comb_delay + arith_delay + _DELAY_FF_SETUP
+        elif ff_bits > 0:
+            critical_path_ns = _DELAY_FF_CKQ + _DELAY_FF_SETUP
+        elif total_comb > 0:
+            critical_path_ns = comb_delay + arith_delay
+        else:
+            critical_path_ns = 0.0
 
-        # Max clock frequency estimate
-        max_freq_mhz = (1000.0 / critical_path_ns) if critical_path_ns > 0 else 999.0
+        max_freq_mhz = (1000.0 / critical_path_ns) if critical_path_ns > 0 else 0.0
 
         # --- Area ---
         # Area in um^2 (rough: 1 gate = ~1 um^2 at 28nm)
@@ -5519,8 +5809,16 @@ class SynthesisEstimator:
             "fpga_resources": {
                 "dsp_blocks": dsp_candidates,
                 "bram_blocks": len(bram_candidates),
-                "lut_count": max(1, total_comb // 4),
+                "lut_count": total_comb // 4 if total_comb > 0 else 0,
                 "ff_count": ff_bits,
+            },
+            "optimization": {
+                "const_prop_count": len(self._optimizations),
+                "dead_branches": len(self._dead_ranges),
+                "constant_outputs": list(self._const_outputs),
+                "constant_signals": {k: v for k, v in
+                                     self._constant_signals.items()},
+                "details": self._optimizations,
             },
         }
 
@@ -5687,6 +5985,43 @@ def _predict_synthesis(result: AnalysisResult,
             confidence="medium",
             detail="Resource estimate for Xilinx 7-series / Intel Cyclone V class",
         ))
+
+    # --- Constant propagation / dead code predictions ---
+    if synth_data:
+        opt = synth_data.get("optimization", {})
+        const_outs = opt.get("constant_outputs", [])
+        const_sigs = opt.get("constant_signals", {})
+        opt_details = opt.get("details", [])
+
+        if opt_details:
+            for d in opt_details:
+                predictions.append(SynthPrediction(
+                    category="optimization",
+                    prediction="Constant propagation: %s" % d["detail"],
+                    confidence="high",
+                    detail="Line %d — branch removed by synthesis" % d["line"],
+                ))
+
+        if const_outs:
+            for name in const_outs:
+                val = const_sigs.get(name, '?')
+                predictions.append(SynthPrediction(
+                    category="optimization",
+                    prediction="Output '%s' is constant %s — no logic needed"
+                               % (name, val),
+                    confidence="high",
+                    detail="Synthesis ties output to constant; "
+                           "driving logic optimized away",
+                ))
+
+        if const_sigs and not const_outs:
+            for name, val in const_sigs.items():
+                predictions.append(SynthPrediction(
+                    category="optimization",
+                    prediction="Signal '%s' reduced to constant %s" % (name, val),
+                    confidence="high",
+                    detail="Dead logic eliminated after constant propagation",
+                ))
 
     # --- Lint-derived predictions (synthesis blockers) ---
     latch = m.get("cogni.lint.latch_inference.count", 0)
@@ -5870,8 +6205,9 @@ def format_analysis(result: AnalysisResult) -> str:
         lines.append(f"{'=' * 50}")
 
         # Group predictions by category
-        cat_order = ["area", "timing", "power", "functional", "latch", "clean"]
+        cat_order = ["optimization", "area", "timing", "power", "functional", "latch", "clean"]
         cat_labels = {
+            "optimization": "OPTIMIZATION (CONST PROP / DEAD CODE)",
             "area": "AREA & RESOURCES",
             "timing": "TIMING",
             "power": "POWER",
@@ -5986,12 +6322,42 @@ def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
             for i, line in enumerate(src.splitlines()))
         sources_text += "\n--- %s ---\n%s\n" % (fname, numbered)
 
-    prompt = (
+    kb = _load_knowledge()
+    prior_context = ""
+    waivers = kb.get("waivers", [])
+    learned = kb.get("learned_rules", [])
+    if waivers or learned:
+        prior_context = "\nALREADY KNOWN — do NOT re-suggest anything that overlaps these:\n"
+        if waivers:
+            prior_context += "\nWaived findings (already suppressed):\n"
+            for w in waivers:
+                prior_context += "  - %s (line %d): %s\n" % (
+                    w.get("rule", "?"), w.get("line", 0),
+                    w.get("reason", "")[:120])
+        if learned:
+            prior_context += "\nLearned rules (already auto-checking):\n"
+            for r in learned:
+                prior_context += "  - %s: %s [pattern: %s]\n" % (
+                    r.get("name", "?"),
+                    r.get("description", "")[:100],
+                    r.get("pattern", "")[:60])
+        prior_context += ("\nDo NOT suggest rules that duplicate the above "
+                          "(even under a different name). "
+                          "Only suggest genuinely NEW patterns.\n\n")
+
+    # Static context — cached across loop iterations (RTL source + instructions + known rules)
+    system_text = (
         "You are a senior RTL verification engineer reviewing lint findings.\n\n"
-        "Below is the RTL source code and the static analysis findings from "
+        "Below is the RTL source code being analyzed by "
         "Cogni (151-rule AST-based analyzer).\n\n"
+        + prior_context +
+        "IMPORTANT: Do NOT flag standard RTL idioms as bugs. These are ACCEPTABLE:\n"
+        "- `count + 1'b1` or `+ 1` for counter increments\n"
+        "- Registered outputs not driven on every branch (FF holds value)\n"
+        "- Standard synchronous reset patterns\n"
+        "- One-hot or binary FSM encodings\n"
+        "Only flag issues that are genuinely bugs or will cause synthesis/simulation problems.\n\n"
         "RTL SOURCE:\n" + sources_text + "\n\n"
-        "STATIC FINDINGS (" + str(len(result.findings)) + "):\n" + findings_text + "\n\n"
         "Your job:\n\n"
         "1. **FALSE POSITIVES**: List any findings that are false positives. "
         "For each, give the rule, line, and why it's wrong.\n\n"
@@ -6003,7 +6369,9 @@ def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
         "so bit_cnt==8 never true, so DATA->STOP_BIT transition never fires, so FSM "
         "loops DATA->DATA forever, making STOP_BIT and FINISH unreachable.\"\n\n"
         "4. **SUGGESTED RULES**: If you see patterns that should become new static rules "
-        "(not one-off bugs), describe each rule: name, what it checks, why it matters.\n\n"
+        "(not one-off bugs), describe each rule: name, what it checks, why it matters. "
+        "Include a `pattern` field with a Python regex that would catch this in RTL source, "
+        "and a `check_type` field set to \"regex\".\n\n"
         "Respond in this exact JSON format:\n"
         '{\n'
         '  "false_positives": [\n'
@@ -6017,10 +6385,15 @@ def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
         '    {"trigger": "...", "chain": "...", "impact": "..."}\n'
         '  ],\n'
         '  "suggested_rules": [\n'
-        '    {"name": "...", "description": "...", "rationale": "..."}\n'
+        '    {"name": "...", "description": "...", "rationale": "...", '
+        '"pattern": "regex_here", "check_type": "regex", "severity": "warning"}\n'
         '  ]\n'
         '}'
     )
+
+    # Dynamic part — changes each iteration (current findings)
+    user_text = ("STATIC FINDINGS (" + str(len(result.findings)) + "):\n"
+                 + findings_text + "\n\nReview these findings against the RTL source above.")
 
     try:
         from dotenv import load_dotenv
@@ -6038,7 +6411,14 @@ def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
         body = _json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
+            "system": [
+                {
+                    "type": "text",
+                    "text": system_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [{"role": "user", "content": user_text}],
         })
         resp = client.invoke_model(modelId=model, body=body)
         resp_body = _json.loads(resp["body"].read())
@@ -6110,20 +6490,68 @@ def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
     enriched.measurements["cogni.agent.suggested_rules"] = [
         r.get("name", "") for r in data.get("suggested_rules", [])]
 
+    # --- Persist learnings to disk ---
+    kb = _load_knowledge()
+
+    # Save false-positive waivers so they auto-suppress on future runs
+    for fp in data.get("false_positives", []):
+        waiver = {
+            "rule": fp.get("rule", ""),
+            "line": fp.get("line", 0),
+            "reason": fp.get("reason", ""),
+            "file_pattern": "",
+            "message_pattern": "",
+        }
+        if not any(w["rule"] == waiver["rule"] and w["line"] == waiver["line"]
+                   for w in kb["waivers"]):
+            kb["waivers"].append(waiver)
+
+    # Save learned rules so they run as checkers on future analyses
+    for sr in data.get("suggested_rules", []):
+        rule_name = sr.get("name", "").strip()
+        if not rule_name:
+            continue
+        rule_name = re.sub(r'\W+', '_', rule_name)
+        if not rule_name.startswith("LEARNED_"):
+            rule_name = "LEARNED_" + rule_name
+        learned = {
+            "name": rule_name,
+            "description": sr.get("description", ""),
+            "rationale": sr.get("rationale", ""),
+            "check_type": sr.get("check_type", "regex"),
+            "pattern": sr.get("pattern", ""),
+            "severity": sr.get("severity", "warning"),
+            "message": sr.get("description", ""),
+        }
+        existing_names = {r["name"] for r in kb["learned_rules"]}
+        existing_patterns = {r.get("pattern", "") for r in kb["learned_rules"]
+                             if r.get("pattern")}
+        if (learned["name"] not in existing_names
+                and learned.get("pattern", "") not in existing_patterns):
+            kb["learned_rules"].append(learned)
+
+    # Append review summary to history
+    kb["review_history"].append({
+        "files": [os.path.basename(f) for f in result.files],
+        "fp_removed": len(data.get("false_positives", [])),
+        "missing_found": len(data.get("missing_bugs", [])),
+        "fsm_consequences": len(data.get("fsm_consequences", [])),
+        "rules_learned": len(data.get("suggested_rules", [])),
+    })
+    if len(kb["review_history"]) > 100:
+        kb["review_history"] = kb["review_history"][-100:]
+
+    _save_knowledge(kb)
+    enriched.measurements["cogni.agent.waivers_total"] = len(kb["waivers"])
+    enriched.measurements["cogni.agent.learned_rules_total"] = len(kb["learned_rules"])
+
     return enriched
 
 
 def analyze_with_agent(rtl_files: list[str],
                        model: str = "us.anthropic.claude-sonnet-4-6",
                        region: str = "us-east-1") -> AnalysisResult:
-    """Full analysis pipeline: static engine + Cogni agent review.
-
-    Phase 1: PARSE (tree-sitter)
-    Phase 2: ELABORATE (params, signals, hierarchy)
-    Phase 3: ANALYZE (151 static rules)
-    Phase 4: PREDICT (synthesis predictions)
-    Phase 5: AGENT REVIEW (LLM via AWS Bedrock — false-positive filter + missing bug discovery)
-    """
+    """Full analysis pipeline: static engine + Cogni agent review."""
     result = analyze_design(rtl_files)
 
     sources = {}
@@ -6136,3 +6564,84 @@ def analyze_with_agent(rtl_files: list[str],
         result = agent_review(result, sources, model=model, region=region)
 
     return result
+
+
+def agent_review_loop(rtl_files: list[str],
+                      rtl_sources: dict[str, str] | None = None,
+                      max_iterations: int = 3,
+                      model: str = "us.anthropic.claude-sonnet-4-6",
+                      region: str = "us-east-1",
+                      on_iteration=None) -> dict:
+    """Looping agent review: analyze → review → learn → re-analyze until convergence.
+
+    Returns a dict with the final AnalysisResult plus iteration log.
+    on_iteration(iteration_num, summary_dict) is called after each round if provided.
+    """
+    kb_before = _load_knowledge()
+    prev_waivers = len(kb_before.get("waivers", []))
+    prev_rules = len(kb_before.get("learned_rules", []))
+
+    sources = dict(rtl_sources) if rtl_sources else {}
+    if not sources:
+        for f in rtl_files:
+            if os.path.isfile(f):
+                with open(f, encoding='utf-8', errors='replace') as fh:
+                    sources[os.path.basename(f)] = fh.read()
+
+    iterations = []
+    result = None
+    prev_finding_keys = set()
+
+    for i in range(1, max_iterations + 1):
+        result = analyze_design(rtl_files)
+        finding_count = len(result.findings)
+
+        result = agent_review(result, sources, model=model, region=region)
+
+        kb_after = _load_knowledge()
+        new_waivers = len(kb_after.get("waivers", [])) - prev_waivers
+        new_rules = len(kb_after.get("learned_rules", [])) - prev_rules
+
+        fp_removed = result.measurements.get("cogni.agent.false_positives", 0)
+        missing_found = result.measurements.get("cogni.agent.missing_bugs", 0)
+        fsm_count = result.measurements.get("cogni.agent.fsm_consequences", 0)
+
+        curr_finding_keys = {(f.rule, f.line, f.file) for f in result.findings}
+
+        summary = {
+            "iteration": i,
+            "findings_in": finding_count,
+            "findings_out": len(result.findings),
+            "fp_removed": fp_removed,
+            "missing_found": missing_found,
+            "fsm_consequences": fsm_count,
+            "new_waivers": new_waivers,
+            "new_rules": new_rules,
+            "total_waivers": len(kb_after.get("waivers", [])),
+            "total_rules": len(kb_after.get("learned_rules", [])),
+        }
+        iterations.append(summary)
+
+        if on_iteration:
+            on_iteration(i, summary)
+
+        prev_waivers = len(kb_after.get("waivers", []))
+        prev_rules = len(kb_after.get("learned_rules", []))
+
+        findings_stable = (curr_finding_keys == prev_finding_keys) if i > 1 else False
+        no_new_knowledge = (new_waivers == 0 and new_rules == 0)
+        count_stable = (i > 1 and
+                        abs(len(curr_finding_keys) - len(prev_finding_keys)) <= 1)
+
+        if findings_stable or no_new_knowledge or count_stable:
+            summary["converged"] = True
+            break
+
+        prev_finding_keys = curr_finding_keys
+
+    return {
+        "result": result,
+        "iterations": iterations,
+        "converged": len(iterations) > 0 and iterations[-1].get("converged", False),
+        "total_iterations": len(iterations),
+    }

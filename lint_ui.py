@@ -349,6 +349,72 @@ def api_run():
     })
 
 
+@app.route("/api/agent_review", methods=["POST"])
+def api_agent_review():
+    data = request.json or {}
+    all_files = data.get("files", {})
+    scenario = data.get("scenario", "")
+
+    if not all_files:
+        code = data.get("code", "")
+        filename = data.get("filename", "design.sv")
+        all_files = {filename: code}
+
+    if scenario:
+        rtl_dir = os.path.join(_SCENARIOS_DIR, scenario, "rtl")
+        if os.path.isdir(rtl_dir):
+            for fn in os.listdir(rtl_dir):
+                if fn.endswith((".sv", ".v", ".svh")) and fn not in all_files:
+                    with open(os.path.join(rtl_dir, fn), encoding="utf-8") as fh:
+                        all_files[fn] = fh.read()
+
+    tmp_dir = tempfile.mkdtemp(prefix="cogni_agent_")
+    tmp_paths = []
+    for fn, code in all_files.items():
+        p = os.path.join(tmp_dir, fn)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(code)
+        tmp_paths.append(p)
+
+    from agent.rtl_analyzer import agent_review_loop
+
+    try:
+        loop_result = agent_review_loop(
+            tmp_paths, rtl_sources=all_files, max_iterations=3)
+        reviewed = loop_result["result"]
+        iters = loop_result["iterations"]
+
+        suggested = reviewed.measurements.get("cogni.agent.suggested_rules", [])
+        agent_findings = [
+            {"rule": f.rule, "severity": f.severity,
+             "file": f.file, "line": f.line,
+             "message": f.message, "synth_impact": f.synth_impact or ""}
+            for f in reviewed.findings
+        ]
+
+        total_fp = sum(it["fp_removed"] for it in iters)
+        total_missing = sum(it["missing_found"] for it in iters)
+        total_fsm = sum(it["fsm_consequences"] for it in iters)
+
+        resp = {
+            "false_positives": total_fp,
+            "missing_bugs": total_missing,
+            "fsm_consequences": total_fsm,
+            "suggested_rules": suggested,
+            "agent_findings": agent_findings,
+            "waivers_total": iters[-1]["total_waivers"] if iters else 0,
+            "learned_rules_total": iters[-1]["total_rules"] if iters else 0,
+            "iterations": iters,
+            "converged": loop_result["converged"],
+            "total_iterations": loop_result["total_iterations"],
+        }
+    except Exception as e:
+        resp = {"error": str(e), "agent_findings": []}
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return jsonify(resp)
+
+
 @app.route("/api/save", methods=["POST"])
 def api_save():
     data = request.json or {}
@@ -597,9 +663,60 @@ body {
 .pred-category.cat-functional { background: #d29922; color: #fff; }
 .pred-category.cat-timing { background: #e3b341; color: #000; }
 .pred-category.cat-area { background: #388bfd; color: #fff; }
+.pred-category.cat-power { background: #a371f7; color: #fff; }
+.pred-category.cat-optimization { background: #39d353; color: #000; }
 .pred-category.cat-clean { background: #238636; color: #fff; }
 .pred-text { color: #c9d1d9; margin-top: 3px; }
 .pred-detail { color: #8b949e; font-size: 11px; margin-top: 2px; }
+
+/* Agent Review */
+.agent-btn {
+  width: 100%; padding: 10px 16px; margin: 12px 0 8px;
+  background: linear-gradient(135deg, #238636, #1a7f37); color: #fff;
+  border: 1px solid #2ea043; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.3px;
+  transition: all 0.2s;
+}
+.agent-btn:hover { background: linear-gradient(135deg, #2ea043, #238636); }
+.agent-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.loading { padding: 12px; color: #8b949e; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.spinner {
+  width: 14px; height: 14px; border: 2px solid #30363d;
+  border-top-color: #58a6ff; border-radius: 50%;
+  animation: spin 0.8s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Synthesis Scorecard */
+.synth-scorecard {
+  background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+  padding: 12px 16px; margin: 8px 0;
+}
+.scorecard-title {
+  font-size: 13px; font-weight: 700; color: #58a6ff;
+  margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.scorecard-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px;
+}
+.scorecard-item {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; padding: 3px 0;
+  border-bottom: 1px solid #21262d;
+}
+.scorecard-label { color: #8b949e; }
+.scorecard-value { color: #c9d1d9; font-weight: 600; font-family: monospace; }
+.scorecard-value.val-warn { color: #d29922; }
+.scorecard-value.val-good { color: #238636; }
+.scorecard-value.val-bad { color: #da3633; }
+
+/* Prediction group headers */
+.pred-group-header {
+  font-size: 11px; font-weight: 700; color: #8b949e;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin: 10px 0 4px 0; padding-bottom: 3px;
+  border-bottom: 1px solid #21262d;
+}
 
 /* Finding severity badges */
 .sev-badge {
@@ -1137,25 +1254,8 @@ function renderCogniResults(result, rules) {
 
   let html = '';
 
-  // Synthesis predictions (the unique value-add)
-  const preds = result.predictions || [];
-  if (preds.length > 0) {
-    html += '<div class="result-section"><h3>SYNTHESIS PREDICTIONS</h3>';
-    preds.forEach(p => {
-      const cls = 'pred-' + p.confidence;
-      const catCls = 'cat-' + p.category;
-      html += `<div class="prediction-item ${cls}">
-        <span class="pred-category ${catCls}">${p.category}</span>
-        <div class="pred-text">${escHtml(p.prediction)}</div>
-        <div class="pred-detail">${escHtml(p.detail)}</div>
-      </div>`;
-    });
-    html += '</div>';
-  }
-
-  // Findings — grouped by severity like SpyGlass
+  // ---- RTL FINDINGS FIRST (grouped by severity) ----
   const findings = result.findings || [];
-  // Build line markers for editor gutter
   state.lineMarkers = buildLineMarkers(findings);
   updateLineNumbers();
 
@@ -1170,13 +1270,14 @@ function renderCogniResults(result, rules) {
       html += `<div class="result-section"><h3>${label} (${items.length})</h3>`;
       items.forEach(f => {
         const sevCls = 'sev-' + f.severity;
+        const synthTip = f.synth_impact ? `<div class="rule-detail">Synth: ${escHtml(f.synth_impact)}</div>` : '';
         html += `<div class="warning-item finding-item" data-line="${f.line}" style="cursor:pointer"
           onclick="scrollToLine(${f.line})">
           <span class="sev-badge ${sevCls}">${f.severity}</span>
           <span class="cat">[${f.rule}]</span>
           <span class="loc">${f.file}:<strong>${f.line}</strong></span>
           <div class="msg">${escHtml(f.message)}</div>
-          <div class="rule-detail">Synth: ${escHtml(f.synth_impact)}</div>
+          ${synthTip}
         </div>`;
       });
       html += '</div>';
@@ -1184,6 +1285,148 @@ function renderCogniResults(result, rules) {
   } else {
     html += '<div class="result-section"><h3>RTL Findings</h3>';
     html += '<div style="padding:8px;color:#238636;font-size:12px">No issues found</div>';
+    html += '</div>';
+  }
+
+  // ---- SYNTHESIS SCORECARD ----
+  const synth = (result.measurements || {})['cogni.synth'];
+  if (synth) {
+    const t = synth.timing || {};
+    const pwr = synth.power || {};
+    const fpga = synth.fpga_resources || {};
+    const fsm = synth.fsm || {};
+    const mem = synth.memory || {};
+    const gb = synth.gate_breakdown || {};
+
+    const gateVal = (synth.total_gates || 0).toLocaleString();
+    const freqVal = (t.max_freq_mhz || 0).toFixed(0);
+    const pathVal = (t.critical_path_ns || 0).toFixed(2);
+    const gatingPct = (pwr.clock_gating_pct || 0).toFixed(0);
+    const gatingCls = gatingPct >= 80 ? 'val-good' : (gatingPct >= 40 ? 'val-warn' : 'val-bad');
+
+    html += `<div class="result-section">
+      <h3>SYNTHESIS SCORECARD</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Gate Equivalents</span>
+            <span class="scorecard-value">${gateVal}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Flip-Flop Bits</span>
+            <span class="scorecard-value">${synth.ff_bits || 0}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Critical Path</span>
+            <span class="scorecard-value">${pathVal} ns</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Max Frequency</span>
+            <span class="scorecard-value">~${freqVal} MHz</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Clock Gating</span>
+            <span class="scorecard-value ${gatingCls}">${gatingPct}%</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Comb Depth</span>
+            <span class="scorecard-value">${t.max_comb_depth || 0} levels</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Sequential</span>
+            <span class="scorecard-value">${(gb.sequential || 0).toLocaleString()} gates</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Combinational</span>
+            <span class="scorecard-value">${(gb.combinational || 0).toLocaleString()} gates</span>
+          </div>`;
+
+    if ((mem.total_bits || 0) > 0) {
+      html += `
+          <div class="scorecard-item">
+            <span class="scorecard-label">Memory</span>
+            <span class="scorecard-value">${(mem.total_bits || 0).toLocaleString()} bits</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Memory Gates</span>
+            <span class="scorecard-value">${(gb.memory || 0).toLocaleString()}</span>
+          </div>`;
+    }
+
+    if (fsm.states > 0) {
+      html += `
+          <div class="scorecard-item">
+            <span class="scorecard-label">FSM States</span>
+            <span class="scorecard-value">${fsm.states} (${fsm.encoding_bits}-bit)</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">FSM Min Bits</span>
+            <span class="scorecard-value">${fsm.min_bits}</span>
+          </div>`;
+    }
+
+    html += `
+          <div class="scorecard-item">
+            <span class="scorecard-label">FPGA LUTs</span>
+            <span class="scorecard-value">~${(fpga.lut_count || 0).toLocaleString()}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">FPGA FFs</span>
+            <span class="scorecard-value">${fpga.ff_count || 0}</span>
+          </div>`;
+
+    if ((fpga.dsp_blocks || 0) > 0) {
+      html += `
+          <div class="scorecard-item">
+            <span class="scorecard-label">FPGA DSPs</span>
+            <span class="scorecard-value">${fpga.dsp_blocks}</span>
+          </div>`;
+    }
+    if ((fpga.bram_blocks || 0) > 0) {
+      html += `
+          <div class="scorecard-item">
+            <span class="scorecard-label">FPGA BRAMs</span>
+            <span class="scorecard-value">${fpga.bram_blocks}</span>
+          </div>`;
+    }
+
+    html += `
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ---- SYNTHESIS PREDICTIONS (grouped by category) ----
+  const preds = result.predictions || [];
+  if (preds.length > 0) {
+    html += '<div class="result-section"><h3>SYNTHESIS PREDICTIONS</h3>';
+
+    const catOrder = ['optimization', 'area', 'timing', 'power', 'functional', 'latch', 'clean'];
+    const catLabels = {
+      optimization: 'Optimization (Const Prop / Dead Code)',
+      area: 'Area & Resources', timing: 'Timing', power: 'Power',
+      functional: 'Functional Risks', latch: 'Latch Inference', clean: 'Status'
+    };
+    const grouped = {};
+    preds.forEach(p => {
+      if (!grouped[p.category]) grouped[p.category] = [];
+      grouped[p.category].push(p);
+    });
+
+    catOrder.forEach(cat => {
+      const items = grouped[cat];
+      if (!items) return;
+      html += `<div class="pred-group-header">${catLabels[cat] || cat}</div>`;
+      items.forEach(p => {
+        const cls = 'pred-' + p.confidence;
+        const catCls = 'cat-' + p.category;
+        html += `<div class="prediction-item ${cls}">
+          <span class="pred-category ${catCls}">${p.category}</span>
+          <div class="pred-text">${escHtml(p.prediction)}</div>
+          <div class="pred-detail">${escHtml(p.detail)}</div>
+        </div>`;
+      });
+    });
     html += '</div>';
   }
 
@@ -1220,7 +1463,113 @@ function renderCogniResults(result, rules) {
     }
   }
 
+  // Agent Review button
+  html += `<div class="result-section">
+    <button class="agent-btn" id="agentBtn" onclick="runAgentReview()">
+      Run Cogni Agent Loop (LLM)
+    </button>
+    <div id="agentResults"></div>
+  </div>`;
+
   container.innerHTML = html;
+}
+
+async function runAgentReview() {
+  const btn = document.getElementById('agentBtn');
+  const out = document.getElementById('agentResults');
+  btn.disabled = true;
+  btn.textContent = 'Agent Loop Running...';
+  out.innerHTML = '<div class="loading"><span class="spinner"></span>Looping: analyze → review → learn → re-analyze until converged...</div>';
+
+  if (state.activeFile) {
+    state.fileContents[state.activeFile] = document.getElementById('codeEditor').value;
+  }
+  const files = Object.assign({}, state.fileContents);
+  const scenario = state.scenario || '';
+  try {
+    const res = await fetch('/api/agent_review', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({files, scenario}),
+    });
+    const data = await res.json();
+    let html = '';
+
+    if (data.error) {
+      html = `<div style="color:#da3633;padding:8px">Error: ${escHtml(data.error)}</div>`;
+    } else {
+      const fp = data.false_positives || 0;
+      const mb = data.missing_bugs || 0;
+      const fc = data.fsm_consequences || 0;
+      const sr = data.suggested_rules || [];
+
+      const wt = data.waivers_total || 0;
+      const lr = data.learned_rules_total || 0;
+      const iters = data.iterations || [];
+      const nIter = data.total_iterations || 1;
+      const conv = data.converged ? 'Converged' : 'Max iterations reached';
+
+      html += `<div style="padding:8px;font-size:13px;font-weight:600;color:${data.converged ? '#39d353' : '#d29922'}">
+        ${conv} after ${nIter} iteration${nIter > 1 ? 's' : ''}
+      </div>`;
+      html += `<div style="padding:4px 8px;font-size:12px;color:#8b949e">
+        Total FPs removed: <strong>${fp}</strong> |
+        Missing bugs found: <strong>${mb}</strong> |
+        FSM consequences: <strong>${fc}</strong>
+      </div>`;
+      html += `<div style="padding:2px 8px;font-size:11px;color:#6e7681">
+        Persisted waivers: <strong>${wt}</strong> |
+        Learned rules: <strong>${lr}</strong>
+        <span style="color:#39d353"> Saved</span>
+      </div>`;
+
+      if (iters.length > 1) {
+        html += '<div style="padding:4px 8px;margin-top:4px">';
+        html += '<div style="font-size:11px;color:#58a6ff;font-weight:600;margin-bottom:4px">Iteration Log</div>';
+        html += '<table style="width:100%;font-size:11px;color:#8b949e;border-collapse:collapse">';
+        html += '<tr style="border-bottom:1px solid #21262d"><th style="text-align:left;padding:2px 6px">#</th><th>In</th><th>Out</th><th>FP</th><th>New Bugs</th><th>+Waivers</th><th>+Rules</th></tr>';
+        iters.forEach(it => {
+          html += `<tr style="border-bottom:1px solid #161b22">
+            <td style="padding:2px 6px">${it.iteration}</td>
+            <td style="text-align:center">${it.findings_in}</td>
+            <td style="text-align:center">${it.findings_out}</td>
+            <td style="text-align:center">${it.fp_removed}</td>
+            <td style="text-align:center">${it.missing_found}</td>
+            <td style="text-align:center;color:${it.new_waivers ? '#d29922' : '#484f58'}">${it.new_waivers}</td>
+            <td style="text-align:center;color:${it.new_rules ? '#39d353' : '#484f58'}">${it.new_rules}</td>
+          </tr>`;
+        });
+        html += '</table></div>';
+      }
+
+      const findings = data.agent_findings || [];
+      if (findings.length > 0) {
+        html += '<h3 style="margin:8px 0 4px">Agent Findings</h3>';
+        findings.forEach(f => {
+          const sevCls = 'sev-' + f.severity;
+          html += `<div class="warning-item finding-item" style="cursor:pointer"
+            onclick="scrollToLine(${f.line})">
+            <span class="sev-badge ${sevCls}">${f.severity}</span>
+            <span class="cat">[${f.rule}]</span>
+            <span class="loc">${f.file}:<strong>${f.line}</strong></span>
+            <div class="msg">${escHtml(f.message)}</div>
+            ${f.synth_impact ? '<div class="rule-detail">Fix: ' + escHtml(f.synth_impact) + '</div>' : ''}
+          </div>`;
+        });
+      }
+      if (sr.length > 0) {
+        html += '<h3 style="margin:8px 0 4px">Suggested New Rules</h3>';
+        sr.forEach(r => {
+          html += `<div style="padding:4px 8px;font-size:12px;color:#c9d1d9">${escHtml(r)}</div>`;
+        });
+      }
+    }
+    out.innerHTML = html;
+  } catch(e) {
+    out.innerHTML = `<div style="color:#da3633;padding:8px">Request failed: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Run Cogni Agent Loop (LLM)';
 }
 
 function renderVCSResults(result, rules) {

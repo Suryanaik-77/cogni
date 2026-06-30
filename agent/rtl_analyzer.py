@@ -4909,6 +4909,80 @@ ALL_CHECKS = [
 # Main analyzer
 # ===================================================================
 
+def _deduplicate_findings(findings: list[Finding]) -> list[Finding]:
+    """Suppress redundant findings — keep the strongest diagnostic per issue.
+
+    SpyGlass behavior: when a stronger rule already explains the bug,
+    suppress weaker/duplicate rules for the same signal or line.
+    """
+    # Index by signal name and line for cross-rule suppression
+    rules_by_line: dict[int, set[str]] = {}
+    signals_by_rule: dict[str, set[str]] = {}
+    for f in findings:
+        rules_by_line.setdefault(f.line, set()).add(f.rule)
+        m = re.search(r"'(\w+)'", f.message)
+        if m:
+            signals_by_rule.setdefault(f.rule, set()).add(m.group(1))
+
+    # Signals that have FUNC_cmp_out_of_range or FUNC_counter_overflow
+    strong_cmp_signals = (
+        signals_by_rule.get("FUNC_cmp_out_of_range", set()) |
+        signals_by_rule.get("FUNC_counter_overflow", set()))
+
+    # Signals with W_multi_driver
+    multi_driver_sigs = signals_by_rule.get("W_multi_driver", set())
+
+    # Signals with W402_latch_inferred
+    latch_sigs = signals_by_rule.get("W402_latch_inferred", set())
+
+    # Lines with W263_case_no_default
+    case_no_default_lines = {f.line for f in findings
+                             if f.rule == "W263_case_no_default"}
+
+    out = []
+    for f in findings:
+        sig = ""
+        m = re.search(r"'(\w+)'", f.message)
+        if m:
+            sig = m.group(1)
+
+        # 1. Suppress FSM_no_default if W263_case_no_default on same line
+        if f.rule == "FSM_no_default" and f.line in case_no_default_lines:
+            continue
+
+        # 2. Suppress W_multi_seq_assign if W_multi_driver covers same signal
+        if f.rule == "W_multi_seq_assign" and sig in multi_driver_sigs:
+            continue
+
+        # 3. Suppress SYNTH_12608_latch if W402_latch_inferred on same signal
+        if f.rule == "SYNTH_12608_latch" and sig in latch_sigs:
+            continue
+
+        # 4. Suppress W362_output_partial if W402 latch on same signal
+        if f.rule == "W362_output_partial" and sig in latch_sigs:
+            continue
+
+        # 5. Suppress W213_sign_compare if stronger cmp rule on same line
+        if f.rule == "W213_sign_compare":
+            line_rules = rules_by_line.get(f.line, set())
+            if line_rules & {"FUNC_cmp_out_of_range", "FUNC_counter_overflow"}:
+                continue
+
+        out.append(f)
+
+    # 6. Merge multi-driver findings into richer message
+    merged = []
+    seen_multi = set()
+    for f in out:
+        if f.rule == "W_multi_driver":
+            if f.message in seen_multi:
+                continue
+            seen_multi.add(f.message)
+        merged.append(f)
+
+    return merged
+
+
 def analyze_file(filepath: str) -> list[Finding]:
     with open(filepath, 'rb') as f:
         src = f.read()
@@ -4923,15 +4997,36 @@ def analyze_file(filepath: str) -> list[Finding]:
             findings.extend(check(tree, filename, signals))
         except Exception:
             pass
-    return findings
+    return _deduplicate_findings(findings)
 
 
 def analyze_design(rtl_files: list[str]) -> AnalysisResult:
     result = AnalysisResult(files=list(rtl_files))
 
+    # Parse all files — keep trees and sources for synthesis estimation
+    parsed_trees = {}   # filename -> tree
+    parsed_sources = {} # filename -> bytes
+    parsed_signals = {} # filename -> dict[str, SignalInfo]
+
     for f in rtl_files:
         if os.path.isfile(f):
-            result.findings.extend(analyze_file(f))
+            with open(f, 'rb') as fh:
+                src = fh.read()
+            tree = _PARSER.parse(src)
+            fname = os.path.basename(f)
+            signals = _elaborate_from_text(src.decode('utf-8', errors='replace'))
+
+            parsed_trees[fname] = tree
+            parsed_sources[fname] = src
+            parsed_signals[fname] = signals
+
+            findings = []
+            for check in ALL_CHECKS:
+                try:
+                    findings.extend(check(tree, fname, signals))
+                except Exception:
+                    pass
+            result.findings.extend(_deduplicate_findings(findings))
 
     # Phase 2b: Cross-module elaboration (when multiple files)
     elab_measurements = {}
@@ -4998,25 +5093,610 @@ def analyze_design(rtl_files: list[str]) -> AnalysisResult:
     }
     result.measurements.update(elab_measurements)
 
-    result.predictions = _predict_synthesis(result)
+    result.predictions = _predict_synthesis(
+        result,
+        trees=parsed_trees,
+        sources=parsed_sources,
+        all_signals=parsed_signals,
+    )
     return result
 
 
 # ===================================================================
-# Phase 4: PREDICT
+# Phase 4: PREDICT — Real synthesis estimation from AST
 # ===================================================================
 
-def _predict_synthesis(result: AnalysisResult) -> list[SynthPrediction]:
+# Gate-equivalent costs (generic standard-cell library)
+_GATE_FF = 6          # DFF = ~6 gate equivalents
+_GATE_LATCH = 4       # D-latch = ~4 gate equivalents
+_GATE_MUX2 = 4        # 2:1 MUX = ~4 gates per bit
+_GATE_ADDER = 5       # per-bit adder gate cost (ripple carry)
+_GATE_COMPARATOR = 3  # per-bit comparator
+_GATE_MULTIPLIER = 5  # per-bit-pair (N*M * this)
+_GATE_DECODER = 2     # per-output decoder gate cost
+
+# Timing estimates (generic 28nm, nanoseconds)
+_DELAY_GATE = 0.05    # inverter/buffer
+_DELAY_MUX2 = 0.10    # 2:1 mux
+_DELAY_ADDER_BIT = 0.08  # per-bit ripple carry
+_DELAY_CLA = 0.30     # carry-lookahead (any width)
+_DELAY_COMP = 0.15    # comparator
+_DELAY_MULT_SMALL = 0.50   # <=8-bit multiplier
+_DELAY_MULT_LARGE = 1.50   # >8-bit multiplier
+_DELAY_FF_SETUP = 0.05
+_DELAY_FF_CKQ = 0.10
+
+
+class SynthesisEstimator:
+    """Walks AST to estimate synthesis gate count, timing, area, and power."""
+
+    def __init__(self, tree, source: bytes, signals: dict):
+        self.tree = tree
+        self.source = source
+        self.signals = signals
+        self.src_text = source.decode('utf-8', errors='replace')
+
+        # Register (FF) tracking: signal_name -> bit_width
+        self.ff_map: dict[str, int] = {}
+        self.latch_map: dict[str, int] = {}
+
+        # Operator counts
+        self.adders: list[tuple[int, int]] = []     # (width, line)
+        self.subtractors: list[tuple[int, int]] = []
+        self.multipliers: list[tuple[int, int, int]] = []  # (w_a, w_b, line)
+        self.comparators: list[tuple[int, int]] = []  # (width, line)
+        self.mux_bits = 0        # total 2:1-equivalent mux bits
+        self.logic_gates = 0     # AND/OR/XOR/NOT gate count
+        self.shift_ops: list[tuple[int, int]] = []   # (width, line)
+
+        # Memory arrays: (word_bits, depth, line)
+        self.memories: list[tuple[int, int, int]] = []
+
+        # Fanout tracking: signal -> read_count
+        self.fanout: dict[str, int] = {}
+
+        # Combinational depth per output signal
+        self.comb_depths: dict[str, int] = {}
+
+        # Clock gating candidates
+        self.ungated_ff_bits = 0
+        self.gated_ff_bits = 0
+
+        # FSM info
+        self.fsm_states = 0
+        self.fsm_encoding_bits = 0
+
+    def estimate(self) -> dict:
+        root = self.tree.root_node
+        self._scan_registers(root)
+        self._scan_combinational(root)
+        self._scan_operators(root)
+        self._scan_memory(root)
+        self._scan_fanout(root)
+        self._scan_fsm(root)
+        return self._build_summary()
+
+    def _sig_width(self, name: str) -> int:
+        s = self.signals.get(name)
+        if s and s.width > 0:
+            return s.width
+        return 1
+
+    def _scan_registers(self, root):
+        """Count flip-flop bits from always_ff assignments."""
+        for always in _find_nodes(root, 'always_construct'):
+            if _always_type(always) != 'always_ff':
+                continue
+            assigned = set()
+            for asgn in (_find_nodes(always, 'nonblocking_assignment')
+                         + _find_nodes(always, 'blocking_assignment')):
+                lhs = _get_lhs_signal(asgn)
+                if lhs:
+                    assigned.add(lhs)
+            has_enable = bool(_find_nodes(always, 'conditional_statement'))
+            for sig in assigned:
+                w = self._sig_width(sig)
+                self.ff_map[sig] = w
+                if has_enable:
+                    self.gated_ff_bits += w
+                else:
+                    self.ungated_ff_bits += w
+
+    def _scan_combinational(self, root):
+        """Count muxes from if/case in combinational blocks."""
+        for always in _find_nodes(root, 'always_construct'):
+            if _always_type(always) != 'always_comb':
+                continue
+            self._count_muxes(always)
+            self._measure_comb_depth(always, 0)
+
+        for ca in _find_nodes(root, 'continuous_assign'):
+            self._count_muxes(ca)
+
+    def _count_muxes(self, node):
+        """Each if/else = 1 mux per assigned bit; each case arm contributes."""
+        for cond in _find_nodes(node, 'conditional_statement'):
+            assigned = set()
+            for asgn in (_find_nodes(cond, 'blocking_assignment')
+                         + _find_nodes(cond, 'nonblocking_assignment')):
+                lhs = _get_lhs_signal(asgn)
+                if lhs:
+                    assigned.add(lhs)
+            for sig in assigned:
+                self.mux_bits += self._sig_width(sig)
+
+        for case in _find_nodes(node, 'case_statement'):
+            arms = _find_nodes(case, 'case_item')
+            n_arms = max(len(arms), 2)
+            assigned = set()
+            for asgn in (_find_nodes(case, 'blocking_assignment')
+                         + _find_nodes(case, 'nonblocking_assignment')):
+                lhs = _get_lhs_signal(asgn)
+                if lhs:
+                    assigned.add(lhs)
+            for sig in assigned:
+                # N:1 mux = (N-1) 2:1 muxes
+                self.mux_bits += self._sig_width(sig) * (n_arms - 1)
+
+    def _measure_comb_depth(self, node, depth, _visited=None):
+        """Measure nesting depth of if/case chains."""
+        import math
+        if _visited is None:
+            _visited = set()
+        node_id = id(node)
+        if node_id in _visited:
+            return
+        _visited.add(node_id)
+
+        # Find direct-child conditionals (not self)
+        for child in node.children:
+            if child.type == 'conditional_statement':
+                new_depth = depth + 1
+                assigned = set()
+                for asgn in (_find_nodes(child, 'blocking_assignment')
+                             + _find_nodes(child, 'nonblocking_assignment')):
+                    lhs = _get_lhs_signal(asgn)
+                    if lhs:
+                        assigned.add(lhs)
+                for sig in assigned:
+                    cur = self.comb_depths.get(sig, 0)
+                    self.comb_depths[sig] = max(cur, new_depth)
+                self._measure_comb_depth(child, new_depth, _visited)
+            elif child.type == 'case_statement':
+                arms = _find_nodes(child, 'case_item')
+                n_arms = max(len(arms), 2)
+                mux_depth = max(1, int(math.ceil(math.log2(n_arms))))
+                new_depth = depth + mux_depth
+                assigned = set()
+                for asgn in (_find_nodes(child, 'blocking_assignment')
+                             + _find_nodes(child, 'nonblocking_assignment')):
+                    lhs = _get_lhs_signal(asgn)
+                    if lhs:
+                        assigned.add(lhs)
+                for sig in assigned:
+                    cur = self.comb_depths.get(sig, 0)
+                    self.comb_depths[sig] = max(cur, new_depth)
+                self._measure_comb_depth(child, new_depth, _visited)
+            else:
+                self._measure_comb_depth(child, depth, _visited)
+
+    def _scan_operators(self, root):
+        """Count arithmetic, comparison, and logic operators."""
+        bin_ops = _find_nodes(root, 'binary_operator')
+        for op_node in bin_ops:
+            op_text = _node_text(op_node)
+            parent = op_node.parent
+            if not parent:
+                continue
+            children = parent.named_children
+            # Get operand widths from context
+            ids = _get_identifiers(parent)
+            max_w = max((self._sig_width(i) for i in ids), default=1)
+            line = _node_line(op_node)
+
+            if op_text in ('+', '-'):
+                self.adders.append((max_w, line))
+            elif op_text == '*':
+                # Try to get both operand widths
+                operands = [c for c in children
+                            if c.type != 'binary_operator']
+                if len(operands) >= 2:
+                    ids_a = _get_identifiers(operands[0])
+                    ids_b = _get_identifiers(operands[1])
+                    w_a = max((self._sig_width(i) for i in ids_a),
+                              default=max_w)
+                    w_b = max((self._sig_width(i) for i in ids_b),
+                              default=max_w)
+                else:
+                    w_a = w_b = max_w
+                self.multipliers.append((w_a, w_b, line))
+            elif op_text in ('==', '!=', '<', '>', '<=', '>='):
+                self.comparators.append((max_w, line))
+            elif op_text in ('<<', '>>', '<<<', '>>>'):
+                self.shift_ops.append((max_w, line))
+            elif op_text in ('&', '|', '^', '~^', '^~'):
+                self.logic_gates += max_w
+            elif op_text in ('&&', '||'):
+                self.logic_gates += 1
+
+        unary_ops = _find_nodes(root, 'unary_operator')
+        for op_node in unary_ops:
+            op_text = _node_text(op_node)
+            if op_text in ('~', '!'):
+                self.logic_gates += 1
+            elif op_text in ('&', '|', '^', '~&', '~|', '~^'):
+                # Reduction operators: N-bit -> 1-bit tree
+                parent = op_node.parent
+                ids = _get_identifiers(parent) if parent else []
+                w = max((self._sig_width(i) for i in ids), default=1)
+                self.logic_gates += w - 1
+
+    def _scan_memory(self, root):
+        """Detect array declarations: logic [W-1:0] name [0:D-1]."""
+        for m in re.finditer(
+                r'(?:logic|reg)\s*\[([^\]]+):([^\]]+)\]\s*(\w+)\s*'
+                r'\[([^\]]+):([^\]]+)\]', self.src_text):
+            hi_w, lo_w, name, hi_d, lo_d = m.groups()
+            params = {s.name: s.param_value for s in self.signals.values()
+                      if getattr(s, 'is_param', False)
+                      and s.param_value is not None}
+            w_hi = _eval_param_expr(hi_w.strip(), params)
+            w_lo = _eval_param_expr(lo_w.strip(), params)
+            d_hi = _eval_param_expr(hi_d.strip(), params)
+            d_lo = _eval_param_expr(lo_d.strip(), params)
+            if all(v is not None for v in (w_hi, w_lo, d_hi, d_lo)):
+                word_bits = abs(w_hi - w_lo) + 1
+                depth = abs(d_hi - d_lo) + 1
+                line_num = self.src_text[:m.start()].count('\n') + 1
+                self.memories.append((word_bits, depth, line_num))
+
+    def _scan_fanout(self, root):
+        """Count how many times each signal is read (not written)."""
+        written = set()
+        for asgn in (_find_nodes(root, 'blocking_assignment')
+                     + _find_nodes(root, 'nonblocking_assignment')
+                     + _find_nodes(root, 'net_assignment')):
+            lhs = _get_lhs_signal(asgn)
+            if lhs:
+                written.add(lhs)
+
+        for ident in _find_nodes(root, 'simple_identifier'):
+            name = _node_text(ident)
+            if name in self.signals:
+                self.fanout[name] = self.fanout.get(name, 0) + 1
+
+    def _scan_fsm(self, root):
+        """Detect FSM enum declarations for encoding analysis."""
+        for enum in _find_nodes(root, 'enum_base_type'):
+            parent = enum.parent
+            if not parent:
+                continue
+            items = _find_nodes(parent, 'enum_name_declaration')
+            if items:
+                self.fsm_states = max(self.fsm_states, len(items))
+            # Get encoding bits from type
+            txt = _node_text(enum)
+            m = re.search(r'\[(\d+):0\]', txt)
+            if m:
+                self.fsm_encoding_bits = int(m.group(1)) + 1
+
+    def _build_summary(self) -> dict:
+        """Compute final gate count, timing, area, and power estimates."""
+        import math
+
+        # --- Gate Count ---
+        ff_bits = sum(self.ff_map.values())
+        ff_gates = ff_bits * _GATE_FF
+
+        latch_bits = sum(self.latch_map.values())
+        latch_gates = latch_bits * _GATE_LATCH
+
+        mux_gates = self.mux_bits * _GATE_MUX2
+
+        adder_gates = sum(w * _GATE_ADDER for w, _ in self.adders)
+        sub_gates = sum(w * _GATE_ADDER for w, _ in self.subtractors)
+        mult_gates = sum(wa * wb * _GATE_MULTIPLIER
+                         for wa, wb, _ in self.multipliers)
+        comp_gates = sum(w * _GATE_COMPARATOR
+                         for w, _ in self.comparators)
+        shift_gates = sum(w * 2 for w, _ in self.shift_ops)
+
+        mem_ff_gates = sum(wbits * depth * _GATE_FF
+                           for wbits, depth, _ in self.memories)
+
+        total_comb = (mux_gates + adder_gates + sub_gates + mult_gates
+                      + comp_gates + shift_gates + self.logic_gates)
+        total_seq = ff_gates + latch_gates
+        total_mem = mem_ff_gates
+        total_gates = total_comb + total_seq + total_mem
+
+        # --- Timing (Critical Path) ---
+        max_comb_depth = max(self.comb_depths.values(), default=0)
+        comb_delay = max_comb_depth * _DELAY_MUX2
+
+        # Add arithmetic delays on the critical path
+        arith_delay = 0.0
+        if self.adders:
+            max_adder_w = max(w for w, _ in self.adders)
+            if max_adder_w <= 16:
+                arith_delay += max_adder_w * _DELAY_ADDER_BIT
+            else:
+                arith_delay += _DELAY_CLA
+        if self.multipliers:
+            max_mult = max(wa * wb for wa, wb, _ in self.multipliers)
+            arith_delay += (_DELAY_MULT_SMALL if max_mult <= 64
+                            else _DELAY_MULT_LARGE)
+        if self.comparators:
+            arith_delay += _DELAY_COMP
+
+        critical_path_ns = _DELAY_FF_CKQ + comb_delay + arith_delay + _DELAY_FF_SETUP
+
+        # Max clock frequency estimate
+        max_freq_mhz = (1000.0 / critical_path_ns) if critical_path_ns > 0 else 999.0
+
+        # --- Area ---
+        # Area in um^2 (rough: 1 gate = ~1 um^2 at 28nm)
+        area_um2 = total_gates * 1.0
+        mem_total_bits = sum(w * d for w, d, _ in self.memories)
+
+        # --- Power ---
+        # Dynamic power proportional to toggle rate * capacitance * V^2 * f
+        # Rough: counters/shift_regs toggle every cycle
+        high_toggle_bits = 0
+        for sig, w in self.ff_map.items():
+            # Counters and shift registers toggle frequently
+            txt_lower = sig.lower()
+            if any(k in txt_lower for k in ('cnt', 'count', 'shift',
+                                              'tick', 'timer', 'div')):
+                high_toggle_bits += w
+
+        # --- Fanout ---
+        high_fanout = [(sig, cnt) for sig, cnt in self.fanout.items()
+                       if cnt >= 8]
+        high_fanout.sort(key=lambda x: -x[1])
+
+        # --- Resource Mapping (FPGA) ---
+        dsp_candidates = len(self.multipliers)
+        bram_candidates = [(w, d, ln) for w, d, ln in self.memories
+                           if w * d >= 1024]
+        lutram_candidates = [(w, d, ln) for w, d, ln in self.memories
+                             if w * d < 1024 and w * d > 0]
+
+        return {
+            "ff_bits": ff_bits,
+            "ff_signals": dict(self.ff_map),
+            "latch_bits": latch_bits,
+            "total_gates": total_gates,
+            "gate_breakdown": {
+                "sequential": total_seq,
+                "combinational": total_comb,
+                "memory": total_mem,
+                "mux": mux_gates,
+                "adder": adder_gates,
+                "multiplier": mult_gates,
+                "comparator": comp_gates,
+                "logic": self.logic_gates,
+            },
+            "timing": {
+                "critical_path_ns": round(critical_path_ns, 2),
+                "max_comb_depth": max_comb_depth,
+                "comb_delay_ns": round(comb_delay, 2),
+                "arith_delay_ns": round(arith_delay, 2),
+                "max_freq_mhz": round(max_freq_mhz, 1),
+            },
+            "area_um2": round(area_um2, 1),
+            "power": {
+                "high_toggle_bits": high_toggle_bits,
+                "ungated_ff_bits": self.ungated_ff_bits,
+                "gated_ff_bits": self.gated_ff_bits,
+                "clock_gating_pct": round(
+                    100 * self.gated_ff_bits / max(ff_bits, 1), 1),
+            },
+            "operators": {
+                "adders": len(self.adders),
+                "multipliers": len(self.multipliers),
+                "comparators": len(self.comparators),
+                "shifters": len(self.shift_ops),
+            },
+            "memory": {
+                "arrays": len(self.memories),
+                "total_bits": mem_total_bits,
+                "details": [{"width": w, "depth": d, "line": ln}
+                            for w, d, ln in self.memories],
+                "bram_candidates": len(bram_candidates),
+                "lutram_candidates": len(lutram_candidates),
+            },
+            "fanout": {
+                "high_fanout_signals": high_fanout[:10],
+                "max_fanout": high_fanout[0] if high_fanout else None,
+            },
+            "fsm": {
+                "states": self.fsm_states,
+                "encoding_bits": self.fsm_encoding_bits,
+                "min_bits": (int(math.ceil(math.log2(max(self.fsm_states, 1))))
+                             if self.fsm_states > 0 else 0),
+            },
+            "fpga_resources": {
+                "dsp_blocks": dsp_candidates,
+                "bram_blocks": len(bram_candidates),
+                "lut_count": max(1, total_comb // 4),
+                "ff_count": ff_bits,
+            },
+        }
+
+
+def _predict_synthesis(result: AnalysisResult,
+                       trees=None, sources=None,
+                       all_signals=None) -> list[SynthPrediction]:
+    """Phase 4: Real synthesis predictions from AST + lint findings."""
     predictions = []
     m = result.measurements
+    synth_data = {}
 
+    # --- AST-based estimation ---
+    if trees and sources and all_signals:
+        for fname in trees:
+            est = SynthesisEstimator(trees[fname], sources[fname],
+                                     all_signals.get(fname, {}))
+            file_data = est.estimate()
+            if not synth_data:
+                synth_data = file_data
+            else:
+                # Merge multi-file estimates
+                synth_data["ff_bits"] += file_data["ff_bits"]
+                synth_data["latch_bits"] += file_data["latch_bits"]
+                synth_data["total_gates"] += file_data["total_gates"]
+                for k in synth_data["gate_breakdown"]:
+                    synth_data["gate_breakdown"][k] += file_data["gate_breakdown"].get(k, 0)
+                old_t = synth_data["timing"]
+                new_t = file_data["timing"]
+                if new_t["critical_path_ns"] > old_t["critical_path_ns"]:
+                    synth_data["timing"] = new_t
+                synth_data["area_um2"] += file_data["area_um2"]
+                synth_data["power"]["high_toggle_bits"] += file_data["power"]["high_toggle_bits"]
+                synth_data["power"]["ungated_ff_bits"] += file_data["power"]["ungated_ff_bits"]
+                synth_data["power"]["gated_ff_bits"] += file_data["power"]["gated_ff_bits"]
+                for k in synth_data["operators"]:
+                    synth_data["operators"][k] += file_data["operators"].get(k, 0)
+                synth_data["memory"]["arrays"] += file_data["memory"]["arrays"]
+                synth_data["memory"]["total_bits"] += file_data["memory"]["total_bits"]
+                synth_data["memory"]["details"].extend(file_data["memory"]["details"])
+                synth_data["fpga_resources"]["dsp_blocks"] += file_data["fpga_resources"]["dsp_blocks"]
+                synth_data["fpga_resources"]["bram_blocks"] += file_data["fpga_resources"]["bram_blocks"]
+                synth_data["fpga_resources"]["lut_count"] += file_data["fpga_resources"]["lut_count"]
+                synth_data["fpga_resources"]["ff_count"] += file_data["fpga_resources"]["ff_count"]
+
+    # Store raw synthesis data in measurements
+    if synth_data:
+        result.measurements["cogni.synth"] = synth_data
+
+    # --- Generate predictions from AST data ---
+    if synth_data:
+        gb = synth_data["gate_breakdown"]
+        predictions.append(SynthPrediction(
+            category="area",
+            prediction="Estimated %d gate equivalents" % synth_data["total_gates"],
+            confidence="medium",
+            detail="Sequential: %d | Combinational: %d | Memory: %d"
+                   % (gb["sequential"], gb["combinational"], gb["memory"]),
+        ))
+
+        predictions.append(SynthPrediction(
+            category="area",
+            prediction="%d flip-flop bits across %d register signals"
+                       % (synth_data["ff_bits"],
+                          len(synth_data.get("ff_signals", {}))),
+            confidence="high",
+            detail="FF area: %d gate equivalents"
+                   % (synth_data["ff_bits"] * _GATE_FF),
+        ))
+
+        timing = synth_data["timing"]
+        predictions.append(SynthPrediction(
+            category="timing",
+            prediction="Critical path: %.2fns (max ~%.0f MHz)"
+                       % (timing["critical_path_ns"], timing["max_freq_mhz"]),
+            confidence="medium",
+            detail="Comb depth %d (%.2fns) + arithmetic %.2fns + FF overhead %.2fns"
+                   % (timing["max_comb_depth"], timing["comb_delay_ns"],
+                      timing["arith_delay_ns"],
+                      _DELAY_FF_CKQ + _DELAY_FF_SETUP),
+        ))
+
+        pwr = synth_data["power"]
+        if pwr["ungated_ff_bits"] > 0:
+            predictions.append(SynthPrediction(
+                category="power",
+                prediction="%d FF bits without clock gating (%.0f%% gated)"
+                           % (pwr["ungated_ff_bits"], pwr["clock_gating_pct"]),
+                confidence="high",
+                detail="Ungated FFs toggle every cycle — add clock gating for %d bits"
+                       % pwr["ungated_ff_bits"],
+            ))
+        if pwr["high_toggle_bits"] > 0:
+            predictions.append(SynthPrediction(
+                category="power",
+                prediction="%d high-toggle-rate bits (counters/shifters)"
+                           % pwr["high_toggle_bits"],
+                confidence="medium",
+                detail="Counters and shift registers dominate dynamic power",
+            ))
+
+        ops = synth_data["operators"]
+        if ops["multipliers"] > 0:
+            predictions.append(SynthPrediction(
+                category="area",
+                prediction="%d multiplier(s) — map to DSP on FPGA"
+                           % ops["multipliers"],
+                confidence="high",
+                detail="Multiplier gates: %d | FPGA: use DSP48 blocks"
+                       % gb["multiplier"],
+            ))
+        if ops["adders"] > 0:
+            predictions.append(SynthPrediction(
+                category="area",
+                prediction="%d adder/subtractor(s)" % ops["adders"],
+                confidence="high",
+                detail="Adder gates: %d" % gb["adder"],
+            ))
+
+        mem = synth_data["memory"]
+        if mem["arrays"] > 0:
+            predictions.append(SynthPrediction(
+                category="area",
+                prediction="%d memory array(s), %d total bits"
+                           % (mem["arrays"], mem["total_bits"]),
+                confidence="high",
+                detail="BRAM candidates: %d | LUTRAM: %d | "
+                       "FF-mapped: %d gate equivalents"
+                       % (synth_data["fpga_resources"]["bram_blocks"],
+                          mem.get("lutram_candidates", 0),
+                          synth_data["gate_breakdown"]["memory"]),
+            ))
+
+        fo = synth_data.get("fanout", {})
+        hf = fo.get("high_fanout_signals", [])
+        if hf:
+            top3 = ", ".join("%s(%d)" % (s, c) for s, c in hf[:3])
+            predictions.append(SynthPrediction(
+                category="timing",
+                prediction="%d high-fanout signal(s) may need buffering"
+                           % len(hf),
+                confidence="medium",
+                detail="Top: %s" % top3,
+            ))
+
+        fsm = synth_data.get("fsm", {})
+        if fsm.get("states", 0) > 0:
+            predictions.append(SynthPrediction(
+                category="area",
+                prediction="FSM: %d states, %d-bit encoding (min %d bits)"
+                           % (fsm["states"], fsm["encoding_bits"],
+                              fsm["min_bits"]),
+                confidence="high",
+                detail="One-hot: %d FFs | Binary: %d FFs"
+                       % (fsm["states"], fsm["min_bits"]),
+            ))
+
+        fpga = synth_data["fpga_resources"]
+        predictions.append(SynthPrediction(
+            category="area",
+            prediction="FPGA: ~%d LUTs, %d FFs, %d DSPs, %d BRAMs"
+                       % (fpga["lut_count"], fpga["ff_count"],
+                          fpga["dsp_blocks"], fpga["bram_blocks"]),
+            confidence="medium",
+            detail="Resource estimate for Xilinx 7-series / Intel Cyclone V class",
+        ))
+
+    # --- Lint-derived predictions (synthesis blockers) ---
     latch = m.get("cogni.lint.latch_inference.count", 0)
     if latch > 0:
         predictions.append(SynthPrediction(
             category="latch",
-            prediction=f"Synthesis will infer {latch} unintended latch(es)",
+            prediction="Synthesis will infer %d unintended latch(es)" % latch,
             confidence="high",
-            detail="Each latch: ~4 gates overhead, timing hazard",
+            detail="Each latch: ~%d gate equivalents, timing hazard"
+                   % _GATE_LATCH,
         ))
 
     blk = m.get("cogni.lint.blocking_in_seq.count", 0)
@@ -5026,88 +5706,36 @@ def _predict_synthesis(result: AnalysisResult) -> list[SynthPrediction]:
             category="functional",
             prediction="Gate-level sim will differ from RTL sim",
             confidence="high",
-            detail=f"{blk} blocking-in-seq + {mix} mixed assignments",
+            detail="%d blocking-in-seq + %d mixed assignments" % (blk, mix),
         ))
 
     multi = m.get("cogni.lint.multiple_drivers.count", 0)
     if multi > 0:
         predictions.append(SynthPrediction(
             category="functional",
-            prediction=f"{multi} signal(s) with multiple drivers",
+            prediction="%d signal(s) with multiple drivers — synthesis may fail"
+                       % multi,
             confidence="high",
-            detail="Bus contention or X propagation",
-        ))
-
-    oor = m.get("cogni.lint.comparison_out_of_range.count", 0)
-    if oor > 0:
-        predictions.append(SynthPrediction(
-            category="functional",
-            prediction=f"{oor} comparison(s) always true/false — dead branches",
-            confidence="high",
-            detail="Signal width can't hold value: unreachable FSM states",
-        ))
-
-    dup = m.get("cogni.lint.duplicate_case.count", 0)
-    if dup > 0:
-        predictions.append(SynthPrediction(
-            category="functional",
-            prediction=f"{dup} duplicate case value(s)",
-            confidence="high",
-            detail="Unreachable arm: sim/synth mismatch",
-        ))
-
-    width = m.get("cogni.lint.width_mismatch.count", 0)
-    if width > 0:
-        predictions.append(SynthPrediction(
-            category="functional",
-            prediction=f"{width} width mismatch(es)",
-            confidence="medium",
-            detail="Implicit extend/truncate may change behavior",
-        ))
-
-    depth = m.get("cogni.lint.comb_depth.max", 0)
-    if depth >= 4:
-        predictions.append(SynthPrediction(
-            category="timing",
-            prediction=f"Comb depth {depth} — critical path risk",
-            confidence="medium",
-            detail=f"~{depth * 0.2:.1f}ns added per decision level",
-        ))
-
-    mem = m.get("cogni.lint.memory_array.count", 0)
-    if mem > 0:
-        predictions.append(SynthPrediction(
-            category="area",
-            prediction=f"{mem} array(s) should use SRAM macros",
-            confidence="high",
-            detail="FF arrays: ~10x area vs SRAM",
+            detail="Bus contention or X propagation in gate-level sim",
         ))
 
     loops = m.get("cogni.lint.comb_loop.count", 0)
     if loops > 0:
         predictions.append(SynthPrediction(
             category="functional",
-            prediction="Synthesis will FAIL — combinational loop",
+            prediction="Synthesis will FAIL — %d combinational loop(s)" % loops,
             confidence="high",
-            detail=f"{loops} loop(s): most tools abort",
+            detail="Most synthesis tools abort on combinational loops",
         ))
 
-    unused = m.get("cogni.lint.unused_signal.count", 0)
-    if unused > 0:
+    oor = m.get("cogni.lint.comparison_out_of_range.count", 0)
+    if oor > 0:
         predictions.append(SynthPrediction(
-            category="area",
-            prediction=f"{unused} dead signal(s) optimized away",
+            category="functional",
+            prediction="%d comparison(s) optimized to constant — dead logic"
+                       % oor,
             confidence="high",
-            detail="May indicate missing connections",
-        ))
-
-    rst = m.get("cogni.lint.async_reset_misuse.count", 0)
-    if rst > 0:
-        predictions.append(SynthPrediction(
-            category="power",
-            prediction=f"Async reset in {rst} data path(s)",
-            confidence="medium",
-            detail="STARC violation: glitch risk during reset",
+            detail="Synthesis removes unreachable branches",
         ))
 
     if not predictions:
@@ -5128,11 +5756,58 @@ def _predict_synthesis(result: AnalysisResult) -> list[SynthPrediction]:
 def format_analysis(result: AnalysisResult) -> str:
     lines = [f"=== COGNI RTL ANALYZER ({len(ALL_CHECKS)} rules, AST-based) ==="]
     lines.append(f"  Files analyzed: {len(result.files)}")
-    lines.append(f"  Total findings: {len(result.findings)}")
     lines.append("")
 
+    # ---- RTL Lint Summary (top-level overview) ----
+    errors = [f for f in result.findings if f.severity == 'error']
+    warnings = [f for f in result.findings if f.severity == 'warning']
+    infos = [f for f in result.findings if f.severity == 'info']
+
+    lines.append(f"{'=' * 50}")
+    lines.append("RTL LINT SUMMARY")
+    lines.append(f"{'=' * 50}")
+    lines.append(f"  Errors   : {len(errors)}")
+    lines.append(f"  Warnings : {len(warnings)}")
+    lines.append(f"  Info     : {len(infos)}")
+    lines.append(f"  Total    : {len(result.findings)}")
+
+    # Critical functional risks
+    critical_rules = {
+        "FUNC_comb_loop": "Combinational loop",
+        "FUNC_counter_overflow": "Counter overflow",
+        "FUNC_cmp_out_of_range": "Dead branch (comparison impossible)",
+        "W_multi_driver": "Multiple drivers",
+        "W263_case_no_default": "Missing case default (latch)",
+        "ELAB_cdc_crossing": "Clock domain crossing",
+        "ELAB_missing_module": "Missing module definition",
+    }
+    active_critical = []
+    for rule, label in critical_rules.items():
+        count = sum(1 for f in result.findings if f.rule == rule)
+        if count > 0:
+            active_critical.append(f"  !! {label} ({count})")
+
+    if active_critical:
+        lines.append("")
+        lines.append("  Critical Risks:")
+        lines.extend(active_critical)
+
+    # Synthesis verdict
+    has_comb_loop = any(f.rule == "FUNC_comb_loop" for f in result.findings)
+    has_multi_driver = any(f.rule == "W_multi_driver" for f in result.findings)
+    if has_comb_loop or has_multi_driver:
+        lines.append("")
+        lines.append("  Synthesis: !! FAIL")
+    elif errors:
+        lines.append("")
+        lines.append("  Synthesis: ! WARNINGS — review errors before tapeout")
+    else:
+        lines.append("")
+        lines.append("  Synthesis: PASS")
+    lines.append("")
+
+    # ---- Detailed findings by category ----
     if result.findings:
-        # Categorize findings by semantic group
         _CATEGORY_MAP = {
             'FUNC_': 'FUNCTIONAL', 'FSM_': 'FUNCTIONAL',
             'ELAB_': 'ELABORATION',
@@ -5193,11 +5868,271 @@ def format_analysis(result: AnalysisResult) -> str:
         lines.append(f"{'=' * 50}")
         lines.append("SYNTHESIS PREDICTIONS")
         lines.append(f"{'=' * 50}")
+
+        # Group predictions by category
+        cat_order = ["area", "timing", "power", "functional", "latch", "clean"]
+        cat_labels = {
+            "area": "AREA & RESOURCES",
+            "timing": "TIMING",
+            "power": "POWER",
+            "functional": "FUNCTIONAL RISKS",
+            "latch": "LATCH INFERENCE",
+            "clean": "STATUS",
+        }
+        by_cat: dict[str, list] = {}
         for p in result.predictions:
-            icon = {"high": "!!", "medium": "!", "low": "~"}.get(
-                p.confidence, "?")
-            lines.append(f"  [{icon}] [{p.category}] {p.prediction}")
-            lines.append(f"       {p.detail}")
+            by_cat.setdefault(p.category, []).append(p)
+
+        for cat in cat_order:
+            preds = by_cat.get(cat)
+            if not preds:
+                continue
+            lines.append(f"  --- {cat_labels.get(cat, cat.upper())} ---")
+            for p in preds:
+                icon = {"high": ">>", "medium": " >", "low": " ~"}.get(
+                    p.confidence, " ?")
+                lines.append(f"  {icon} {p.prediction}")
+                lines.append(f"       {p.detail}")
+            lines.append("")
+
+        # Show synthesis data summary if available
+        sd = result.measurements.get("cogni.synth")
+        if sd:
+            lines.append(f"  --- SYNTHESIS SCORECARD ---")
+            lines.append(f"  Gate Equivalents : {sd['total_gates']:,}")
+            lines.append(f"  Flip-Flop Bits   : {sd['ff_bits']}")
+            lines.append(f"  Critical Path    : {sd['timing']['critical_path_ns']:.2f} ns")
+            lines.append(f"  Max Frequency    : ~{sd['timing']['max_freq_mhz']:.0f} MHz")
+            lines.append(f"  Area (est.)      : ~{sd['area_um2']:.0f} um2")
+            lines.append(f"  Clock Gating     : {sd['power']['clock_gating_pct']:.0f}%")
+            if sd['memory']['total_bits'] > 0:
+                lines.append(f"  Memory Bits      : {sd['memory']['total_bits']:,}")
             lines.append("")
 
     return "\n".join(lines)
+
+
+# ===================================================================
+# Phase 5: COGNI AGENT — LLM-powered review layer
+# ===================================================================
+
+def _parse_llm_json(raw: str):
+    """Parse JSON from LLM output, tolerating common formatting issues."""
+    import json as _j
+    # First try direct parse
+    try:
+        return _j.loads(raw)
+    except _j.JSONDecodeError:
+        pass
+    # Try to extract each top-level array independently
+    keys = ["false_positives", "missing_bugs", "fsm_consequences", "suggested_rules"]
+    data = {}
+    for key in keys:
+        pattern = r'"%s"\s*:\s*\[' % key
+        m = re.search(pattern, raw)
+        if not m:
+            data[key] = []
+            continue
+        start = m.end() - 1
+        depth = 0
+        end = start
+        for i in range(start, len(raw)):
+            if raw[i] == '[':
+                depth += 1
+            elif raw[i] == ']':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        arr_str = raw[start:end]
+        arr_str = re.sub(r',\s*\]', ']', arr_str)
+        try:
+            data[key] = _j.loads(arr_str)
+        except _j.JSONDecodeError:
+            # Last resort: extract individual objects
+            objs = []
+            for obj_m in re.finditer(r'\{[^{}]*\}', arr_str):
+                try:
+                    objs.append(_j.loads(obj_m.group()))
+                except _j.JSONDecodeError:
+                    pass
+            data[key] = objs
+    return data if any(data.values()) else None
+
+
+def agent_review(result: AnalysisResult, rtl_sources: dict[str, str],
+                 model: str = "us.anthropic.claude-sonnet-4-6",
+                 region: str = "us-east-1") -> AnalysisResult:
+    """Layer 2: Cogni Agent reviews static findings against RTL source via AWS Bedrock.
+
+    Reads every finding + the actual RTL code, then:
+    1. Flags false positives with reasoning
+    2. Discovers missing bugs the static engine missed
+    3. Traces FSM consequences (overflow -> stuck state -> unreachable)
+    4. Suggests concrete fixes
+
+    Returns an enriched AnalysisResult with agent annotations.
+    """
+    import boto3, json as _json
+
+    findings_text = "\n".join(
+        "  [%7s] %s %s:%d -- %s" % (f.severity, f.rule, f.file, f.line, f.message)
+        for f in result.findings)
+
+    sources_text = ""
+    for fname, src in rtl_sources.items():
+        numbered = "\n".join(
+            "%4d| %s" % (i+1, line)
+            for i, line in enumerate(src.splitlines()))
+        sources_text += "\n--- %s ---\n%s\n" % (fname, numbered)
+
+    prompt = (
+        "You are a senior RTL verification engineer reviewing lint findings.\n\n"
+        "Below is the RTL source code and the static analysis findings from "
+        "Cogni (151-rule AST-based analyzer).\n\n"
+        "RTL SOURCE:\n" + sources_text + "\n\n"
+        "STATIC FINDINGS (" + str(len(result.findings)) + "):\n" + findings_text + "\n\n"
+        "Your job:\n\n"
+        "1. **FALSE POSITIVES**: List any findings that are false positives. "
+        "For each, give the rule, line, and why it's wrong.\n\n"
+        "2. **MISSING BUGS**: List any real RTL bugs the static analyzer missed. "
+        "For each, give the line number, what the bug is, and what category it would be "
+        "(e.g., FUNC, FSM, CDC, TIMING).\n\n"
+        "3. **FSM CONSEQUENCES**: For any counter overflow, comparison-out-of-range, "
+        "or dead branch -- trace the FSM consequence. Example: \"bit_cnt wraps at 7, "
+        "so bit_cnt==8 never true, so DATA->STOP_BIT transition never fires, so FSM "
+        "loops DATA->DATA forever, making STOP_BIT and FINISH unreachable.\"\n\n"
+        "4. **SUGGESTED RULES**: If you see patterns that should become new static rules "
+        "(not one-off bugs), describe each rule: name, what it checks, why it matters.\n\n"
+        "Respond in this exact JSON format:\n"
+        '{\n'
+        '  "false_positives": [\n'
+        '    {"rule": "...", "line": 0, "reason": "..."}\n'
+        '  ],\n'
+        '  "missing_bugs": [\n'
+        '    {"line": 0, "severity": "error|warning|info", "category": "...", '
+        '"message": "...", "fix": "..."}\n'
+        '  ],\n'
+        '  "fsm_consequences": [\n'
+        '    {"trigger": "...", "chain": "...", "impact": "..."}\n'
+        '  ],\n'
+        '  "suggested_rules": [\n'
+        '    {"name": "...", "description": "...", "rationale": "..."}\n'
+        '  ]\n'
+        '}'
+    )
+
+    try:
+        from dotenv import load_dotenv
+        from botocore.config import Config
+        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+        load_dotenv(env_path)
+
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", region),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            config=Config(read_timeout=120, connect_timeout=10),
+        )
+        body = _json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}],
+        })
+        resp = client.invoke_model(modelId=model, body=body)
+        resp_body = _json.loads(resp["body"].read())
+        text = resp_body["content"][0]["text"]
+        # Try ```json ... ``` block first, then outermost { ... }
+        code_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+        raw = code_match.group(1) if code_match else None
+        if not raw:
+            json_match = re.search(r'\{[\s\S]*\}', text)
+            if not json_match:
+                return result
+            raw = json_match.group()
+        # Strip trailing commas before ] or } (common LLM mistake)
+        raw = re.sub(r',\s*([}\]])', r'\1', raw)
+        data = _parse_llm_json(raw)
+        if data is None:
+            return result
+    except Exception as e:
+        print("[Cogni Agent] Bedrock call failed: %s" % e)
+        return result
+
+    # Enrich the result with agent findings
+    enriched = AnalysisResult(
+        files=result.files,
+        findings=list(result.findings),
+        predictions=list(result.predictions),
+        measurements=dict(result.measurements),
+    )
+
+    # Mark false positives
+    fp_keys = set()
+    for fp in data.get("false_positives", []):
+        fp_keys.add((fp.get("rule", ""), fp.get("line", 0)))
+    enriched.findings = [
+        f for f in enriched.findings
+        if (f.rule, f.line) not in fp_keys
+    ]
+
+    # Add missing bugs as new findings
+    for bug in data.get("missing_bugs", []):
+        file = result.files[0] if result.files else "unknown"
+        enriched.findings.append(Finding(
+            rule=f"AGENT_{bug.get('category', 'FUNC')}",
+            severity=bug.get("severity", "warning"),
+            file=os.path.basename(file),
+            line=bug.get("line", 0),
+            message=bug.get("message", ""),
+            synth_impact=bug.get("fix", ""),
+        ))
+
+    # Add FSM consequence findings
+    for fsm in data.get("fsm_consequences", []):
+        enriched.findings.append(Finding(
+            rule="AGENT_FSM_consequence",
+            severity="error",
+            file=os.path.basename(result.files[0]) if result.files else "",
+            line=0,
+            message=f"{fsm.get('trigger', '')}: {fsm.get('chain', '')}",
+            synth_impact=fsm.get("impact", ""),
+        ))
+
+    # Store agent metadata
+    enriched.measurements["cogni.agent.false_positives"] = len(
+        data.get("false_positives", []))
+    enriched.measurements["cogni.agent.missing_bugs"] = len(
+        data.get("missing_bugs", []))
+    enriched.measurements["cogni.agent.fsm_consequences"] = len(
+        data.get("fsm_consequences", []))
+    enriched.measurements["cogni.agent.suggested_rules"] = [
+        r.get("name", "") for r in data.get("suggested_rules", [])]
+
+    return enriched
+
+
+def analyze_with_agent(rtl_files: list[str],
+                       model: str = "us.anthropic.claude-sonnet-4-6",
+                       region: str = "us-east-1") -> AnalysisResult:
+    """Full analysis pipeline: static engine + Cogni agent review.
+
+    Phase 1: PARSE (tree-sitter)
+    Phase 2: ELABORATE (params, signals, hierarchy)
+    Phase 3: ANALYZE (151 static rules)
+    Phase 4: PREDICT (synthesis predictions)
+    Phase 5: AGENT REVIEW (LLM via AWS Bedrock — false-positive filter + missing bug discovery)
+    """
+    result = analyze_design(rtl_files)
+
+    sources = {}
+    for f in rtl_files:
+        if os.path.isfile(f):
+            with open(f, encoding='utf-8', errors='replace') as fh:
+                sources[os.path.basename(f)] = fh.read()
+
+    if sources:
+        result = agent_review(result, sources, model=model, region=region)
+
+    return result

@@ -36,3 +36,6 @@ memory/rule_health.json
 # PLY parser build artifacts
 parser.out
 parsetab.py
+
+# Learned-rule runtime stats sidecar (regenerated each run)
+agent/cogni_rule_stats.json

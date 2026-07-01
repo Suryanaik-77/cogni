@@ -86,6 +86,28 @@ def _save_knowledge(kb: dict) -> None:
         _json.dump(kb, f, indent=2)
 
 
+# Learned-rule runtime stats live in a gitignored sidecar keyed by rule name.
+# Keeping them out of cogni_knowledge.json means the tracked file holds only
+# rule *definitions* (reviewable), while the volatile hit/accuracy counters
+# (rewritten every analysis run) never create commit churn.
+_RULE_STATS_FILE = os.path.join(os.path.dirname(__file__), "cogni_rule_stats.json")
+
+
+def _load_rule_stats() -> dict:
+    if os.path.isfile(_RULE_STATS_FILE):
+        try:
+            with open(_RULE_STATS_FILE, encoding="utf-8") as f:
+                return _json.load(f)
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_rule_stats(stats: dict) -> None:
+    with open(_RULE_STATS_FILE, "w", encoding="utf-8") as f:
+        _json.dump(stats, f, indent=2, sort_keys=True)
+
+
 def _apply_waivers(findings: list[Finding]) -> list[Finding]:
     kb = _load_knowledge()
     waivers = kb.get("waivers", [])
@@ -114,6 +136,7 @@ def _apply_waivers(findings: list[Finding]) -> list[Finding]:
 def _run_learned_rules(tree, filename: str,
                        signals: dict) -> list[Finding]:
     kb = _load_knowledge()
+    rule_stats = _load_rule_stats()
     findings = []
     for rule in kb.get("learned_rules", []):
         name = rule.get("name", "LEARNED_unknown")
@@ -124,7 +147,8 @@ def _run_learned_rules(tree, filename: str,
 
         if not pattern:
             continue
-        if rule.get("status") == "disabled":
+        # Auto-disable status lives in the runtime stats sidecar.
+        if rule_stats.get(name, {}).get("status") == "disabled":
             continue
 
         if check_type == "regex":
@@ -176,6 +200,7 @@ def _score_learned_rules(findings: list[Finding],
     rules = kb.get("learned_rules", [])
     if not rules:
         return
+    rule_stats = _load_rule_stats()   # volatile counters, gitignored sidecar
 
     # Index which lines each built-in rule covers
     builtin_lines: dict[str, set[tuple[str, int]]] = {}
@@ -199,19 +224,14 @@ def _score_learned_rules(findings: list[Finding],
     for f in learned_findings:
         learned_by_rule.setdefault(f.rule, []).append(f)
 
-    changed = False
     for rule in rules:
         name = rule.get("name", "")
         if not name:
             continue
 
-        # Initialize stats if missing
-        if "stats" not in rule:
-            rule["stats"] = {"hits": 0, "waived": 0, "overlap": 0,
-                             "runs": 0, "accuracy": 1.0}
-            changed = True
-
-        stats = rule["stats"]
+        stats = rule_stats.setdefault(
+            name, {"hits": 0, "waived": 0, "overlap": 0,
+                   "runs": 0, "accuracy": 1.0})
         stats["runs"] = stats.get("runs", 0) + 1
 
         hits = learned_by_rule.get(name, [])
@@ -241,15 +261,12 @@ def _score_learned_rules(findings: list[Finding],
         if (stats.get("runs", 0) >= 3
                 and total_hits >= 3
                 and stats["accuracy"] < 0.3):
-            rule["status"] = "disabled"
-            rule["disable_reason"] = (
+            stats["status"] = "disabled"
+            stats["disable_reason"] = (
                 f"accuracy {stats['accuracy']:.0%} after {total_hits} hits "
                 f"({stats.get('waived',0)} waived, {stats.get('overlap',0)} overlap)")
 
-        changed = True
-
-    if changed:
-        _save_knowledge(kb)
+    _save_rule_stats(rule_stats)
 
 
 def get_learned_rule_health() -> list[dict]:
@@ -259,13 +276,14 @@ def get_learned_rule_health() -> list[dict]:
     Sorted by accuracy ascending (worst first) so the UI can show which rules need attention.
     """
     kb = _load_knowledge()
+    rule_stats = _load_rule_stats()
     health = []
     for rule in kb.get("learned_rules", []):
         name = rule.get("name", "")
-        stats = rule.get("stats", {})
+        stats = rule_stats.get(name, {})
         health.append({
             "name": name,
-            "status": rule.get("status", "active"),
+            "status": stats.get("status", "active"),
             "accuracy": stats.get("accuracy", 1.0),
             "hits": stats.get("hits", 0),
             "waived": stats.get("waived", 0),
@@ -277,7 +295,7 @@ def get_learned_rule_health() -> list[dict]:
                                 + ("..." if len(rule.get("pattern", "")) > 50
                                    else "")),
             "description": rule.get("description", "")[:100],
-            "disable_reason": rule.get("disable_reason", ""),
+            "disable_reason": stats.get("disable_reason", ""),
         })
     health.sort(key=lambda x: (x["status"] != "disabled", x["accuracy"]))
     return health
@@ -9704,14 +9722,11 @@ _CONFIDENCE_MAP = {
 
 
 def _learned_rule_confidence(rule_name: str) -> int:
-    """Get per-rule confidence from tracked accuracy stats."""
-    kb = _load_knowledge()
-    for r in kb.get("learned_rules", []):
-        if r.get("name") == rule_name:
-            stats = r.get("stats")
-            if stats and stats.get("runs", 0) >= 2:
-                acc = stats.get("accuracy", 0.5)
-                return max(10, min(80, int(acc * 80)))
+    """Get per-rule confidence from tracked accuracy stats (sidecar)."""
+    stats = _load_rule_stats().get(rule_name)
+    if stats and stats.get("runs", 0) >= 2:
+        acc = stats.get("accuracy", 0.5)
+        return max(10, min(80, int(acc * 80)))
     return 50
 
 

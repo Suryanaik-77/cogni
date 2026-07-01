@@ -5767,20 +5767,50 @@ def CROSS_width_override(tree, file, signals):
 # -------------------------------------------------------------------
 
 def _is_fsm_enum(type_name, tree):
-    """Check if a typedef enum is used as a registered state variable (not just a decoder)."""
+    """True only when a variable of this enum type is a registered *state* whose
+    next value depends on its current value (a real FSM). A pipeline/opcode
+    register that merely latches an input (`op_reg <= op_in`) is NOT an FSM,
+    even though it is a registered enum."""
     text = _node_text(tree.root_node)
     decl_pat = re.compile(r'\b' + re.escape(type_name) + r'\s+(\w+(?:\s*,\s*\w+)*)\s*;')
-    var_names = []
+    var_names = set()
     for dm in decl_pat.finditer(text):
-        var_names.extend(v.strip() for v in dm.group(1).split(','))
+        var_names.update(v.strip() for v in dm.group(1).split(','))
     if not var_names:
         return False
+
+    # Registered vars of this type, and the RHS identifiers they load from.
+    registered: dict[str, set[str]] = {}
     for always in _find_nodes(tree.root_node, 'always_construct'):
         if _always_type(always) != 'always_ff':
             continue
-        at = _node_text(always)
-        for vn in var_names:
-            if re.search(r'\b' + re.escape(vn) + r'\s*<=', at):
+        for asgn in _find_nodes(always, 'nonblocking_assignment'):
+            lhs = _get_lhs_signal(asgn)
+            if lhs in var_names:
+                kids = asgn.named_children
+                rhs = set(_get_identifiers(kids[-1])) if len(kids) >= 2 else set()
+                registered.setdefault(lhs, set()).update(rhs)
+    if not registered:
+        return False
+
+    # A real FSM reads its current state to pick its next state:
+    #   (a) direct self-dependency:  state <= f(state)
+    #   (b) case(state)/if(state) drives the state or its next-state feeder.
+    feeders = set(registered)
+    for rhs in registered.values():
+        feeders |= rhs
+    for v, rhs in registered.items():
+        if v in rhs:                       # (a)
+            return True
+    for cs in _find_nodes(tree.root_node, 'case_statement'):
+        ce = [c for c in cs.named_children if c.type == 'case_expression']
+        if not ce:
+            continue
+        if not (set(_get_identifiers(ce[0])) & set(registered)):
+            continue                       # case does not switch on the state
+        for asgn in (_find_nodes(cs, 'nonblocking_assignment')
+                     + _find_nodes(cs, 'blocking_assignment')):
+            if _get_lhs_signal(asgn) in feeders:   # (b)
                 return True
     return False
 

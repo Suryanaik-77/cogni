@@ -10814,10 +10814,38 @@ class SynthesisEstimator:
             else:
                 self._measure_comb_depth(child, depth, _visited)
 
+    def _gen_loops(self, root):
+        """Generate-for loops as (start_byte, end_byte, trip_count) — hardware
+        inside them is replicated trip_count times by synthesis."""
+        loops = []
+        for gen in _find_nodes(root, 'generate_region'):
+            gtext = _strip_comments(gen.text.decode('utf-8', errors='replace'))
+            for m in re.finditer(
+                    r'for\s*\(\s*\w+\s*=\s*([^;]+);\s*\w+\s*(<=?)\s*([^;]+);',
+                    gtext):
+                lo = self.elab.const_of(m.group(1))
+                hi = self.elab.const_of(m.group(3))
+                if lo is None or hi is None:
+                    continue
+                trip = (hi - lo + 1) if m.group(2) == '<=' else (hi - lo)
+                if 1 < trip <= 4096:
+                    loops.append((gen.start_byte, gen.end_byte, trip))
+        return loops
+
+    def _gen_factor(self, node) -> int:
+        """Replication factor for hardware at `node` (product of enclosing
+        generate-for trip counts), capped to avoid pathological blow-up."""
+        factor = 1
+        for (s, e, trip) in self._gen_loop_ranges:
+            if s <= node.start_byte and node.end_byte <= e:
+                factor *= trip
+        return min(factor, 256)
+
     def _scan_operators(self, root):
         """Count arithmetic, comparison, and logic operators."""
         elab = self.elab
         enum_members = elab.enum_members
+        self._gen_loop_ranges = self._gen_loops(root)
 
         for expr in _find_nodes(root, 'expression'):
             if self._is_dead(expr):
@@ -10874,27 +10902,34 @@ class SynthesisEstimator:
             max_w = max(_expr_width(left), _expr_width(right))
             line = _node_line(expr)
             expr_text = _node_text(expr)
+            # Hardware inside a generate-for is replicated per iteration.
+            rep = self._gen_factor(expr)
 
             if op_text in ('+', '-'):
-                self.adders.append((max_w, line, expr_text))
+                for _ in range(rep):
+                    self.adders.append((max_w, line, expr_text))
             elif op_text == '*':
                 w_a = _expr_width(left)
                 w_b = _expr_width(right)
-                self.multipliers.append((w_a, w_b, line))
+                for _ in range(rep):
+                    self.multipliers.append((w_a, w_b, line))
             elif op_text in ('==', '!=', '<', '>', '<=', '>='):
                 has_enum = any(i in enum_members for i in ids)
                 if has_enum:
-                    self.state_decodes.append((max_w, line, expr_text))
+                    for _ in range(rep):
+                        self.state_decodes.append((max_w, line, expr_text))
                 elif op_text in ('==', '!=') and max_w <= 1:
                     # 1-bit equality (e.g. cpha == 1'b0) is a single XNOR/XOR
                     # gate, not a comparator cell.
-                    self.logic_gates += 1
+                    self.logic_gates += rep
                 else:
-                    self.comparators.append((max_w, line, expr_text))
+                    for _ in range(rep):
+                        self.comparators.append((max_w, line, expr_text))
             elif op_text in ('<<', '>>', '<<<', '>>>'):
-                self.shift_ops.append((max_w, line))
+                for _ in range(rep):
+                    self.shift_ops.append((max_w, line))
             elif op_text in ('&', '|', '^', '~^', '^~'):
-                self.logic_gates += max_w
+                self.logic_gates += max_w * rep
             elif op_text in ('&&', '||'):
                 self.logic_gates += 1
 

@@ -5468,14 +5468,16 @@ def STRUCT_generate_no_label(tree, file, signals):
     """Generate block without label."""
     findings = []
     for gen in _find_nodes(tree.root_node, 'generate_region'):
-        text = _node_text(gen)[:80]
-        if ':' not in text.split('\n')[0]:
-            findings.append(Finding(
-                rule="STRUCT_gen_no_label", severity="info",
-                file=file, line=_node_line(gen),
-                message="Generate block without label: harder to reference in hierarchy",
-                synth_impact="Unnamed generate: synthesis assigns auto-names",
-            ))
+        text = _strip_comments(_node_text(gen))
+        # Labeled if any generate/for/if block carries `begin : <name>`.
+        if re.search(r'\bbegin\s*:\s*\w+', text):
+            continue
+        findings.append(Finding(
+            rule="STRUCT_gen_no_label", severity="info",
+            file=file, line=_node_line(gen),
+            message="Generate block without label: harder to reference in hierarchy",
+            synth_impact="Unnamed generate: synthesis assigns auto-names",
+        ))
     return findings
 
 
@@ -10605,6 +10607,15 @@ class SynthesisEstimator:
                 lhs = _get_lhs_signal(asgn)
                 if lhs:
                     assigned.add(lhs)
+            # Fallback: inside generate loops, tree-sitter may not emit
+            # nonblocking_assignment nodes for genvar-indexed LHS
+            # (`pwm_out[i] <= ...`). Recover registered signals from text.
+            if not assigned:
+                atxt = _strip_comments(_node_text(always))
+                for m in re.finditer(r'(\w+)\s*(?:\[[^\]]*\])?\s*<=', atxt):
+                    name = m.group(1)
+                    if name in self.signals:
+                        assigned.add(name)
             ce_sigs = self._detect_clock_enable(always)
             for sig in assigned:
                 w = self._sig_width(sig)

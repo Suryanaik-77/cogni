@@ -3650,33 +3650,93 @@ def FUNC_comb_depth(tree, file, signals):
     return findings
 
 
+def _split_top_level(text: str, sep: str = ',') -> list[str]:
+    """Split on top-level `sep`, respecting () {} [] nesting."""
+    parts, depth, cur = [], 0, ''
+    for ch in text:
+        if ch in '({[':
+            depth += 1
+        elif ch in ')}]':
+            depth -= 1
+        if ch == sep and depth == 0:
+            parts.append(cur)
+            cur = ''
+        else:
+            cur += ch
+    if cur.strip():
+        parts.append(cur)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _operand_width(expr: str, signals, elab=None) -> int | None:
+    """Width of a single expression operand (not a comma list).
+    A boolean/logical/comparison result is 1 bit — NOT the sum of its
+    operands, which is the classic concat-width bug."""
+    expr = expr.strip()
+    # Replication {N{x}}
+    m = re.fullmatch(r'\{\s*(\w+)\s*\{(.+)\}\s*\}', expr)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else (
+            elab.const_of(m.group(1)) if elab else None)
+        w = _operand_width(m.group(2), signals, elab)
+        return n * w if (n and w) else None
+    # Nested concat
+    if expr.startswith('{') and expr.endswith('}'):
+        return _concat_width(expr, signals, elab)
+    # Sized literal N'b...
+    m = re.match(r"(\d+)'[bBhHdDoO]", expr)
+    if m:
+        return int(m.group(1))
+    # Boolean/logical/comparison/reduction result → 1 bit
+    if re.search(r'&&|\|\||==|!=|>=|<=|[<>]|^\s*!|^\s*[&|^~]', expr):
+        return 1
+    # Part-select sig[hi:lo]
+    m = re.fullmatch(r'(\w+)\s*\[(.+):(.+)\]', expr)
+    if m and elab:
+        hi, lo = elab.const_of(m.group(2)), elab.const_of(m.group(3))
+        if hi is not None and lo is not None:
+            return abs(hi - lo) + 1
+    # Bit-select sig[i] → 1
+    if re.fullmatch(r'\w+\s*\[[^\]:]+\]', expr):
+        return 1
+    # Bare signal
+    si = signals.get(expr)
+    if si and si.width > 0:
+        return si.width
+    return None
+
+
+def _concat_width(text: str, signals, elab=None) -> int | None:
+    """Width of a concatenation = sum of its top-level element widths."""
+    inner = text.strip()
+    if inner.startswith('{') and inner.endswith('}'):
+        inner = inner[1:-1]
+    total = 0
+    for elem in _split_top_level(inner):
+        w = _operand_width(elem, signals, elab)
+        if w is None:
+            return None
+        total += w
+    return total if total > 0 else None
+
+
 def FUNC_case_width_mismatch(tree, file, signals):
     """Case expression width doesn't match case item widths."""
     findings = []
-    params = {s.name: s.param_value for s in signals.values()
-              if s.is_param and s.param_value is not None}
+    elab = _current_elab(tree, signals)
     for cs in _find_nodes(tree.root_node, 'case_statement'):
         ce_nodes = [c for c in cs.named_children
                     if c.type == 'case_expression']
         if not ce_nodes:
             continue
         ce_text = _node_text(ce_nodes[0]).strip()
-        ce_ids = _get_identifiers(ce_nodes[0])
         ce_width = None
-        # Concatenation: {a, b, c} — sum widths of all elements
+        # Concatenation: width = sum of ELEMENT widths (a boolean element is
+        # 1 bit, not the sum of the identifiers inside it).
         if ce_text.startswith('{') and ce_text.endswith('}'):
-            total = 0
-            for cid in ce_ids:
-                si = signals.get(cid)
-                if si and si.width > 0:
-                    total += si.width
-                else:
-                    total = 0
-                    break
-            if total > 0:
-                ce_width = total
+            ce_width = _concat_width(ce_text, signals, elab)
         else:
-            for cid in ce_ids:
+            for cid in _get_identifiers(ce_nodes[0]):
                 si = signals.get(cid)
                 if si and si.width > 0:
                     ce_width = si.width
@@ -11349,7 +11409,8 @@ def _predict_synthesis(result: AnalysisResult,
                                % (mem_type, mem["arrays"], mem["total_bits"]),
                     confidence="high",
                     detail="FPGA: %d BRAM candidate(s) | "
-                           "ASIC: needs SRAM macro for large arrays"
+                           "ASIC: synthesizable as a flip-flop array; a "
+                           "dedicated SRAM macro is recommended for area/power"
                            % bram,
                 ))
 

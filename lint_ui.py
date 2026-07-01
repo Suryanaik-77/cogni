@@ -1531,6 +1531,67 @@ function renderCogniResults(result, rules) {
     html += '</table></div>';
   }
 
+  // ---- TIMING PREDICTION (back-annotated from inferred netlist) ----
+  const timing = (result.measurements || {})['cogni.timing'];
+  const sdcTiming = (result.measurements || {})['cogni.sdc.timing'];
+  if (timing && (timing.critical_paths || []).length) {
+    const fmax = timing.max_freq_mhz || 0;
+    // Relative band, not an absolute number — logic delay is process-dependent.
+    const band = timing.worst_depth <= 2 ? 'Very short (timing-friendly)' :
+                 timing.worst_depth <= 4 ? 'Short' :
+                 timing.worst_depth <= 8 ? 'Moderate' : 'Long (watch closely)';
+    const fpgaBand = fmax >= 500 ? '>500 MHz' :
+                     fmax >= 250 ? '250-500 MHz' :
+                     fmax >= 100 ? '100-250 MHz' : '<100 MHz';
+    html += '<div class="result-section"><h3>TIMING PREDICTION</h3>';
+    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Logic-only estimate — wire-load, placement &amp; routing ignored. Relative ranking, not sign-off.</div>`;
+    html += `<div class="synth-scorecard"><div class="scorecard-grid">
+      <div class="scorecard-item"><span class="scorecard-label">Critical path</span>
+        <span class="scorecard-value val-warn">${band}</span></div>
+      <div class="scorecard-item"><span class="scorecard-label">Logic depth</span>
+        <span class="scorecard-value">${timing.worst_depth} level(s)</span></div>
+      <div class="scorecard-item"><span class="scorecard-label">Endpoint</span>
+        <span class="scorecard-value">${escHtml(timing.worst_endpoint || '')}</span></div>
+    </div></div>`;
+    html += `<div style="color:#8b949e;font-size:10px;margin:6px 0">Est. logic delay ~${timing.worst_path_ns} ns → FPGA Fmax ${fpgaBand}, ASIC higher. Actual timing depends on technology library, placement, and routing.</div>`;
+
+    html += `<h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">CRITICAL PATHS (register/output endpoints)</h4>
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+        <th style="padding:3px">Endpoint</th><th>Delay</th><th>Depth</th><th>Launch &rarr; path</th></tr>`;
+    (timing.critical_paths || []).slice(0, 5).forEach(p => {
+      const chain = (p.path || []).map(c =>
+        c.type + (c.line ? '@' + c.line : '')).join(' &rarr; ');
+      const launch = p.launched_by || 'primary-input';
+      const kind = p.endpoint_kind ? ' <span style="color:#8b949e">(' + p.endpoint_kind + ')</span>' : '';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px;color:#c9d1d9">${escHtml(p.endpoint || '')}${kind}</td>
+        <td style="color:#d29922">${p.total_ns} ns</td>
+        <td style="color:#8b949e">${p.depth}</td>
+        <td style="color:#8b949e">${escHtml(launch)} &rarr; ${chain}</td></tr>`;
+    });
+    html += '</table>';
+
+    // Per-clock slack when an SDC was supplied.
+    if (sdcTiming && Object.keys(sdcTiming).length) {
+      html += `<h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">SDC TIMING SLACK</h4>
+        <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:3px">Clock</th><th>Period</th><th>Critical</th><th>Slack</th><th>Status</th></tr>`;
+      for (const [clk, si] of Object.entries(sdcTiming)) {
+        const ok = si.met;
+        html += `<tr style="border-bottom:1px solid #21262d">
+          <td style="padding:3px;color:#c9d1d9">${escHtml(clk)}</td>
+          <td style="color:#8b949e">${si.period_ns} ns (${si.freq_mhz} MHz)</td>
+          <td style="color:#8b949e">${si.critical_path_ns} ns</td>
+          <td style="color:${ok ? '#238636' : '#da3633'}">${si.slack_ns >= 0 ? '+' : ''}${si.slack_ns} ns</td>
+          <td style="color:${ok ? '#238636' : '#da3633'}">${ok ? 'MET' : 'VIOLATED'}</td></tr>`;
+      }
+      html += '</table>';
+    }
+    html += '</div>';
+  }
+
   // ---- SYNTHESIS PREDICTIONS (grouped by category) ----
   const preds = result.predictions || [];
   if (preds.length > 0) {

@@ -1010,9 +1010,13 @@ function renderCogniResults(result, rules) {
   // Classify each finding by domain so the synthesis view stays focused.
   // CDC/RDC are clock/reset-domain risks (reported separately below); STYLE_*
   // are cosmetic. Everything else is a synthesis/functional finding.
+  // Readability/quality rules belong with style, not the synthesis view.
+  const qualityRules = new Set([
+    'STRUCT_deep_nesting', 'STRUCT_nested_ternary', 'FUNC_magic_numbers',
+    'W456_many_ports', 'STARC_many_regs', 'STARC_if_else_chain']);
   const domainOf = (r) =>
     (/^CDC_/.test(r) || /^RDC_/.test(r)) ? 'risk' :
-    /^STYLE_/.test(r) ? 'style' : 'synth';
+    (/^STYLE_/.test(r) || qualityRules.has(r)) ? 'style' : 'synth';
   const findings   = allFindings.filter(f => domainOf(f.rule) === 'synth');
   const riskFindings  = allFindings.filter(f => domainOf(f.rule) === 'risk');
   const styleFindings = allFindings.filter(f => domainOf(f.rule) === 'style');
@@ -1571,22 +1575,30 @@ function renderCogniResults(result, rules) {
     </div></div>`;
     html += `<div style="color:#8b949e;font-size:10px;margin:6px 0">Est. logic delay ~${timing.worst_path_ns} ns → FPGA Fmax ${fpgaBand}, ASIC higher. Actual timing depends on technology library, placement, and routing.</div>`;
 
-    html += `<h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">CRITICAL PATHS (register/output endpoints)</h4>
-      <table style="width:100%;font-size:11px;border-collapse:collapse">
-      <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
-        <th style="padding:3px">Endpoint</th><th>Delay</th><th>Depth</th><th>Launch &rarr; path</th></tr>`;
+    // Friendly names for the inferred cell types on a path.
+    const cellName = (c) => {
+      const expr = (c.expr || '');
+      if (c.type === 'ADDER') return /-/.test(expr) && !/\+/.test(expr) ? 'Decrementer' :
+                                     /\+\s*1/.test(expr) ? 'Incrementer' : 'Adder';
+      return {COMP:'Comparator', MUX:'Mux', SHIFT:'Shifter', MULT:'Multiplier',
+              LUT:'Logic', FF:'Register', LATCH:'Latch', BRAM:'Memory'}[c.type] || c.type;
+    };
+    html += `<h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">CRITICAL PATHS (longest logic chains)</h4>`;
     (timing.critical_paths || []).slice(0, 5).forEach(p => {
-      const chain = (p.path || []).map(c =>
-        c.type + (c.line ? '@' + c.line : '')).join(' &rarr; ');
-      const launch = p.launched_by || 'primary-input';
-      const kind = p.endpoint_kind ? ' <span style="color:#8b949e">(' + p.endpoint_kind + ')</span>' : '';
-      html += `<tr style="border-bottom:1px solid #21262d">
-        <td style="padding:3px;color:#c9d1d9">${escHtml(p.endpoint || '')}${kind}</td>
-        <td style="color:#d29922">${p.total_ns} ns</td>
-        <td style="color:#8b949e">${p.depth}</td>
-        <td style="color:#8b949e">${escHtml(launch)} &rarr; ${chain}</td></tr>`;
+      const launch = p.launched_by || 'input';
+      const logic = (p.path || [])
+        .filter(c => c.type !== 'FF' && c.type !== 'LATCH')
+        .map(c => cellName(c) + (c.line ? ' <span style="color:#6e7681">(L' + c.line + ')</span>' : ''));
+      const endpoint = (p.endpoint || '') + (p.endpoint_kind === 'reg' ? ' register' : '');
+      const flow = [`<span style="color:#58a6ff">${escHtml(launch)}</span>`]
+        .concat(logic.map(l => `<span style="color:#d29922">${l}</span>`))
+        .concat([`<span style="color:#3fb950">${escHtml(endpoint)}</span>`])
+        .join(' <span style="color:#6e7681">&rarr;</span> ');
+      html += `<div style="margin:5px 0;padding:5px 8px;background:#161b22;border-radius:4px;border-left:3px solid #d29922">
+        <div style="font-size:11px">${flow}</div>
+        <div style="color:#8b949e;font-size:10px;margin-top:2px">Logic depth ${p.depth} &middot; est. ${p.total_ns} ns</div>
+      </div>`;
     });
-    html += '</table>';
 
     // Per-clock slack when an SDC was supplied.
     if (sdcTiming && Object.keys(sdcTiming).length) {
@@ -1643,6 +1655,44 @@ function renderCogniResults(result, rules) {
     html += '</div>';
   }
 
+  // ---- OPTIMIZATION OPPORTUNITIES (what synthesis will do) ----
+  const synthOpt = (result.measurements || {})['cogni.synth'];
+  if (synthOpt) {
+    const o = synthOpt.optimization || {};
+    const op = synthOpt.operators || {};
+    const ce = synthOpt.ce_signals || [];
+    const nce = synthOpt.non_ce_signals || [];
+    const memo = synthOpt.memory || {};
+    const cmpDet = op.comparator_details || [];
+    const eqCmp = cmpDet.filter(d => /==|!=/.test(d.expr || '')).length;
+    const items = [];
+    if (op.adders > 0) items.push(['Carry-chain inference', `${op.adders} adder/subtractor(s) map to dedicated carry logic`]);
+    if (ce.length > 0) items.push(['Clock-enable inference', `${ce.length} of ${ce.length + nce.length} register blocks gate on an enable`]);
+    if (eqCmp > 0) items.push(['Comparator simplification', `${eqCmp} equality compare(s) reduce to XNOR/AND trees`]);
+    if ((o.const_prop_count || 0) > 0) items.push(['Constant propagation', `${o.const_prop_count} constant expression(s) folded`]);
+    if ((o.dead_branches || 0) > 0) items.push(['Dead-branch elimination', `${o.dead_branches} unreachable branch(es) removed`]);
+    if ((o.constant_outputs || []).length > 0) items.push(['Constant output pruning', `${o.constant_outputs.length} tied-off output(s)`]);
+    if (memo.arrays > 0) items.push(['Memory inference', `${memo.arrays} array(s), ${memo.total_bits} bits`]);
+    // Analyses we do NOT perform — state plainly so the absence isn't misread.
+    const notDetected = ['Retiming (register balancing)', 'Resource sharing (mux-folding of operators)'];
+    if (items.length || notDetected.length) {
+      html += '<div class="result-section"><h3>OPTIMIZATION OPPORTUNITIES</h3>';
+      html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">What synthesis is expected to do with this RTL (inferred from structure).</div>`;
+      items.forEach(([name, detail]) => {
+        html += `<div style="margin:3px 0;font-size:11px">
+          <span style="color:#3fb950">&#10003;</span>
+          <strong style="color:#c9d1d9">${name}</strong>
+          <span style="color:#8b949e"> &mdash; ${escHtml(detail)}</span></div>`;
+      });
+      notDetected.forEach(name => {
+        html += `<div style="margin:3px 0;font-size:11px">
+          <span style="color:#6e7681">&#9675;</span>
+          <span style="color:#6e7681">${name} &mdash; not analyzed</span></div>`;
+      });
+      html += '</div>';
+    }
+  }
+
   // ---- DESIGN RISKS (CDC / RDC) — separate from synthesis ----
   if (riskFindings.length > 0) {
     const cdc = riskFindings.filter(f => /^CDC_/.test(f.rule));
@@ -1654,10 +1704,10 @@ function renderCogniResults(result, rules) {
     html += '</div>';
   }
 
-  // ---- CODING STYLE — separate from synthesis ----
+  // ---- CODING STYLE & QUALITY — separate from synthesis ----
   if (styleFindings.length > 0) {
-    html += `<div class="result-section"><h3>CODING STYLE (${styleFindings.length})</h3>`;
-    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Cosmetic / convention suggestions &mdash; no synthesis impact.</div>`;
+    html += `<div class="result-section"><h3>CODING STYLE &amp; QUALITY (${styleFindings.length})</h3>`;
+    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Cosmetic / convention / readability suggestions &mdash; no synthesis impact.</div>`;
     html += renderFindingList(styleFindings);
     html += '</div>';
   }

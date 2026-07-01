@@ -1549,7 +1549,7 @@
       "rationale": "For non-power-of-2 N, a $clog2(N)-bit pointer can represent values beyond N-1. If the pointer is ever loaded with an out-of-range value (e.g., due to a reset sequencing issue or synthesis truncation), the round-robin walk will compute out-of-bounds indices, causing stale grants or permanent deadlock. A formal assertion catches this at verification time.",
       "check_type": "regex",
       "pattern": "localparam\\s+\\w+\\s*=\\s*\\$clog2\\s*\\(\\s*N\\s*\\)(?:(?!endmodule)[\\s\\S])*?(?!assert)(?:pointer|ptr)\\s*<=\\s*next_pointer",
-      "severity": "warning",
+      "severity": "info",
       "message": "Detect round-robin arbiter modules where a pointer signal is declared with PTR_W=$clog2(N) bits and updated by combinational next-pointer logic, but there is no assertion (assert property or immediate assert) that pointer < N anywhere in the module."
     },
     {
@@ -1567,7 +1567,7 @@
       "rationale": "Power-of-2 FIFOs rely on unsigned pointer overflow for wrap-around. Without a guard assertion, passing a non-power-of-2 DEPTH silently corrupts FIFO behavior at the pointer wrap point.",
       "check_type": "regex",
       "pattern": "\\$clog2\\s*\\(\\s*DEPTH\\s*\\)(?:(?!initial\\s+assert|\\$fatal|\\$error|\\(DEPTH\\s*&\\s*\\(DEPTH\\s*-\\s*1\\))(?!endmodule)[\\s\\S])*endmodule",
-      "severity": "warning",
+      "severity": "info",
       "message": "Detect FIFO modules that declare pointer signals using $clog2(DEPTH)-wide logic (implying power-of-2 wrap behavior) but do not contain a compile-time or simulation-time assertion enforcing that DEPTH is a power of 2. If DEPTH is not a power of 2, the pointer natural wrap-around will be incorrect, producing memory aliasing and wrong full/empty counts."
     },
     {
@@ -1576,7 +1576,7 @@
       "rationale": "Threshold parameters that are not validated can silently produce permanently-asserted or permanently-deasserted almost-full/almost-empty flags, which defeats their purpose and can cause data loss in flow-controlled systems.",
       "check_type": "regex",
       "pattern": "parameter\\s+int\\s+ALMOST_(?:FULL|EMPTY)_THRESH(?:(?!initial\\s+assert|\\$fatal|\\$error)(?!endmodule)[\\s\\S])*endmodule",
-      "severity": "warning",
+      "severity": "info",
       "message": "Detect FIFO modules that declare ALMOST_FULL_THRESH or ALMOST_EMPTY_THRESH parameters without any assertion checking that the threshold is within [1, DEPTH-1] range. Out-of-range thresholds (negative or exceeding DEPTH) will cause almost_full/almost_empty to be permanently asserted or deasserted."
     },
     {

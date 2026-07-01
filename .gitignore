@@ -32,3 +32,7 @@ scenarios/**/ready_out/
 # Per-design memory and rule health (runtime state, not source)
 memory/designs/
 memory/rule_health.json
+
+# PLY parser build artifacts
+parser.out
+parsetab.py

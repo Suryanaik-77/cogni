@@ -27,6 +27,1168 @@
       "reason": "This is a valid false positive flag in principle, but marking it as a false positive because the rule targets a style/documentation concern rather than a functional bug. The synchronous reset pattern (rst checked inside always_ff @(posedge clk) with no rst in the sensitivity list) is a completely standard and correct RTL idiom in SystemVerilog. The always_ff sensitivity list in SV implicitly covers all signals needed for correct simulation \u2014 the absence of rst in the sensitivity list is not a bug. Whether synchronous or asynchronous reset is 'intended' is a design choice, not an error. Flagging well-formed synchronous reset as undocumented is a style/cosmetic concern equivalent to the already-waived STYLE_endmod_label finding and should be treated similarly.",
       "file_pattern": "",
       "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "line": 15,
+      "reason": "This module DOES have a comparison to the maximum value \u2014 line 19 checks 'count == {WIDTH{1'b1}}' to generate an overflow signal. The counter is intentionally designed to wrap, and the max-value comparison exists for overflow detection. The rule fires incorrectly because it only scans the always_ff block and misses the always_comb comparison to the all-ones maximum.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 24,
+      "reason": "Already waived \u2014 listed in the known-waived findings. Should not be re-reported.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 11,
+      "reason": "Already waived \u2014 listed in the known-waived findings. Should not be re-reported.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_no_begin_end",
+      "line": 1,
+      "reason": "The always_ff block at line 11 already uses begin/end. The if/else branches inside (lines 12-15) are single-statement branches \u2014 omitting begin/end for single-statement if/else is a widely accepted, standard Verilog/SystemVerilog style and does not cause any functional or synthesis issue. This is purely cosmetic and should be waived or demoted to a style-only note.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "line": 15,
+      "reason": "This finding is partially redundant given the overflow detection logic at line 19. The design explicitly checks for count == {WIDTH{1'b1}} to generate an overflow signal, demonstrating awareness of wrap-around. However, the actual functional bug here is the missing else in the always_comb block (latch), not the counter increment itself. The counter increment is a standard free-running counter idiom.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_comb_output",
+      "line": 8,
+      "reason": "This is an informational style suggestion, not a bug. Combinational overflow detection is a common and valid RTL pattern. Whether to register the output is a micro-architecture decision, not a correctness issue. This is noise for a counter overflow flag.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_mod_name",
+      "line": 1,
+      "reason": "The file is named 'design.sv' which is a generic placeholder name used in sandboxed/review contexts. The module name 'buggy_counter' is intentional. This is a purely cosmetic/project-convention issue and not an RTL bug. It should be waived in any non-project-specific lint run.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_OVERFLOW_FLAG_TIMING_MISMATCH",
+      "line": 19,
+      "reason": "This is not necessarily an off-by-one timing bug \u2014 it is a valid and common design pattern to assert overflow combinationally WHEN count == MAX (all-ones), which signals that on the NEXT clock edge (when en is high) the counter will wrap. Whether this is correct depends on the design intent: if overflow is meant to signal 'the counter is at max and will wrap next cycle', the combinational decode of count == {WIDTH{1'b1}} is correct. The rule over-generalizes. In this specific module there is no documented spec saying overflow must be registered or must be asserted post-wrap, so flagging it as a timing mismatch bug is a false positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COMB_OUTPUT_PERMANENTLY_LATCHED_AFTER_EVENT",
+      "line": 8,
+      "reason": "The error severity is overstated. This is a real latch inference issue, but 'permanently latched post-event' is misleading \u2014 the latch will de-assert when count drops below {WIDTH{1'b1}} (e.g., after a reset). It is not a one-way latch. The underlying latch inference is real, but the rule description and error severity mischaracterize the behavior. Should be a warning about latch inference, not an error about permanent latching.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "line": 7,
+      "reason": "The design explicitly checks for the all-ones condition on line 10 to generate an overflow signal, demonstrating awareness of wrap-around. This is the intended behavior for a free-running counter named 'buggy_counter'. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "line": 7,
+      "reason": "The design does have a comparison to the maximum value (count == {WIDTH{1'b1}}) on line 10. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 5,
+      "reason": "Synchronous reset is a valid, standard RTL pattern. This is a style/documentation suggestion only, not a functional bug. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_OVERFLOW_FLAG_TIMING_MISMATCH",
+      "line": 10,
+      "reason": "Asserting overflow combinationally when count == all-ones (i.e., one cycle before the wrap) is a common and often intentional design pattern \u2014 it gives downstream logic one cycle of warning before wrap occurs. Whether this is an 'off-by-one' bug depends entirely on the specification. Without evidence of a spec mismatch, this is not a confirmed bug. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_comb_output",
+      "line": 3,
+      "reason": "Combinational overflow detection is a standard RTL pattern. This is an informational style suggestion, not a bug. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 12,
+      "reason": "Missing endmodule label is cosmetic only, zero functional or synthesis impact. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W402_latch_inferred",
+      "line": 52,
+      "reason": "The always_comb block at line 50 has both if and else branches for 'full' (lines 52 and 54), so full is fully assigned in all branches. No latch is inferred for 'full'. The latch warning is incorrect for this signal.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_reduction_1bit",
+      "line": 43,
+      "reason": "The condition 'push && pop' is a logical AND of two 1-bit signals, not a bitwise reduction. The analyzer is misidentifying logical AND as a reduction operation. This is a false positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 32,
+      "reason": "Already waived in prior instances per the known-waived findings list. Should not be re-reported.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 5,
+      "reason": "clk is used as the clock edge trigger in both always_ff blocks at lines 32 and 42. It is functionally read by the sequential logic even if it does not appear on an RHS expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 6,
+      "reason": "rst is read in the condition at line 33 (if (rst)). It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 7,
+      "reason": "push is read in the conditions at lines 22 and 43. It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 8,
+      "reason": "pop is read in the condition at line 24. It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 18,
+      "reason": "req[0], req[1], req[2] are single-bit selects of a vector \u2014 they are 1-bit signals used as booleans, which is correct. The tool appears to be flagging the parent vector 'req[N-1:0]' rather than recognizing that each condition uses a single-bit slice. This is a false positive; single-bit indexing of a vector in a boolean context is standard and correct RTL.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 20,
+      "reason": "Same as above \u2014 req[1] is a 1-bit slice, not a multi-bit boolean. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 22,
+      "reason": "Same as above \u2014 req[2] is a 1-bit slice. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 59,
+      "reason": "grant[0] is a 1-bit slice of a vector used as a boolean condition. This is standard RTL. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 61,
+      "reason": "grant[1] is a 1-bit slice. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 63,
+      "reason": "grant[2] is a 1-bit slice. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W224_multibit_bool",
+      "line": 65,
+      "reason": "grant[3] is a 1-bit slice. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 31,
+      "reason": "Already waived in prior instances per the known-waived findings list. Should not be re-reported.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 4,
+      "reason": "clk is used as the clock edge trigger in the always_ff blocks at lines 31, 41, and 58. It is functionally read by the sequential logic sensitivity lists. Already waived in a prior instance.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 70,
+      "reason": "Missing endmodule label is cosmetic only, zero functional or synthesis impact. Already waived in prior instances.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "CLK_no_reset",
+      "line": 41,
+      "reason": "This finding is technically correct but misleading in isolation \u2014 the real issue is the multi-driver bug (W_multi_driver). The always_ff block at line 41-44 is itself a bug (duplicate driver for 'grant'), so flagging its lack of reset is a secondary/redundant observation on an already-broken block. More importantly, 'grant' DOES have a reset path in the primary always_ff block at lines 31-36. The finding should not be treated as an independent reset-path deficiency since the block itself should not exist.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 9,
+      "reason": "penable is read in the condition at line 29 (psel && penable && pwrite) and line 65 (psel && penable). It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 10,
+      "reason": "pwrite is read in the conditions at lines 29 (psel && penable && pwrite) and 42 (!pwrite). It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 11,
+      "reason": "paddr is read in the comparisons at lines 30, 32, 43, and 45. It is clearly used in the module body.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INPUT_PORT_UNREAD",
+      "line": 12,
+      "reason": "pwdata is read in the RHS of the assignments at lines 31 and 33 (reg0 <= pwdata, reg1 <= pwdata). It is clearly used.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 18,
+      "reason": "reg0 is read on the RHS at line 44 (prdata = reg0) and line 66 (reg0 <= reg0). It is not unread \u2014 it feeds the prdata output path.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 19,
+      "reason": "reg1 is read on the RHS at line 46 (prdata = reg1). It is not unread \u2014 it feeds the prdata output path.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_reduction_1bit",
+      "line": 29,
+      "reason": "The condition 'psel && penable && pwrite' is a logical AND of 1-bit signals, not a bitwise reduction operator. The analyzer is misidentifying && as a reduction operation. This is standard boolean logic.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_reduction_1bit",
+      "line": 65,
+      "reason": "psel && penable is a logical AND of two 1-bit signals. Not a reduction operator. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
+      "line": 24,
+      "reason": "Already waived in prior instances per the known-waived findings list. Should not be re-reported.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "CLK_no_reset",
+      "line": 64,
+      "reason": "While technically correct that this always_ff block has no reset, this block is itself the multi-driver bug (W_multi_driver). The absence of reset is secondary to and overshadowed by the more critical W_multi_driver error already flagged on line 24/64. Additionally, reg0 IS reset in the peer always_ff block at line 24. The real issue is the multi-driver conflict, not the missing reset.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STRUCT_deep_nesting",
+      "line": 24,
+      "reason": "The nesting in the always_ff block at line 24 is at most 3 levels deep (always_ff -> if/else -> if/else-if). A reported depth of 6 appears to be a miscalculation by the tool. This does not reach a genuinely problematic nesting depth.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_comb_output",
+      "line": 14,
+      "reason": "Already waived in prior instances \u2014 this is an informational style suggestion, not a bug. Combinational prdata is a common and valid APB read-data path pattern.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_comb_output",
+      "line": 15,
+      "reason": "Already waived in prior instances \u2014 pready being combinational is a standard APB zero-wait-state slave pattern. Informational only.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 69,
+      "reason": "Already waived in prior instances \u2014 missing endmodule label is cosmetic only with zero functional or synthesis impact.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W164_width_mismatch",
+      "line": 102,
+      "reason": "bit_cnt is declared as [$clog2(DATA_BITS):0] which for DATA_BITS=8 gives [3:0] = 4 bits. DATA_BITS is a parameter of type int (32b). The comparison 'bit_cnt == DATA_BITS-1' is valid: the constant expression DATA_BITS-1 evaluates to 7, which fits in 4 bits. The tool is flagging a spurious width mismatch because it compares the declared width of DATA_BITS (the parameter type, 32b) against bit_cnt. The actual compared value is a constant that fits in range.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W213_sign_compare",
+      "line": 102,
+      "reason": "DATA_BITS is declared as 'parameter int' (signed), and bit_cnt is unsigned logic. However, DATA_BITS-1 is a compile-time constant expression used as a literal comparison target. The synthesizer/simulator evaluates it as a non-negative constant. There is no runtime signed/unsigned hazard here \u2014 this is a spurious warning caused by the 'int' parameter type declaration.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SYNTH_12608_latch",
+      "line": 89,
+      "reason": "The always_comb block at line 82 has a default assignment 'next_state = state' at line 84, before the case statement. This guarantees next_state is always assigned regardless of any branch coverage. No latch is inferred. The tool is incorrectly flagging the if-without-else inside the IDLE case arm because it does not recognize the outer default assignment.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 28,
+      "reason": "shift_reg is read on lines 63 (tx <= shift_reg[0]) and 64 (shift_reg <= shift_reg >> 1), and it feeds the tx output register indirectly. It is clearly read in the datapath. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 29,
+      "reason": "bit_cnt is read on line 102 in the next-state logic (if (bit_cnt == DATA_BITS-1)). It is not unread. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STRUCT_empty_block",
+      "line": 72,
+      "reason": "The empty default block in a case statement is intentional \u2014 it causes the FF to hold its value (standard RTL idiom). This is not a bug and is common practice in datapath case statements to suppress synthesis warnings about incomplete case coverage.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 157,
+      "reason": "Missing endmodule label is cosmetic only, zero functional or synthesis impact. Already waived in prior instances.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "PWR_no_clock_gate",
+      "line": 44,
+      "reason": "Clock gating is a power optimization suggestion, not a bug. The always_ff block correctly implements an FSM datapath with case-based enables. The registers are only meaningfully written in specific states, so adding a clock gate would require synthesizing the enable condition externally \u2014 this is a valid synthesis concern but not an RTL bug. More importantly, the flag says '3 regs without enable' but shift_reg, bit_cnt, and tx are all conditionally updated only in specific FSM states (DATA, LOAD, START_BIT, STOP_BIT), which IS an implicit enable. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FSM_OUTPUT_REGISTERED_TX_IMPLICIT_HOLD",
+      "line": 44,
+      "reason": "tx is driven in START_BIT (0), DATA (shift_reg[0]), and STOP_BIT (1), and reset to 1'b1 on rst_n. The implicit FF hold for IDLE, LOAD, and FINISH is intentional \u2014 tx should remain at its last value (1'b1 after STOP_BIT, or held in LOAD). This is standard registered-output FSM behavior. The LOAD state correctly holds tx at 1'b1 from reset, and FINISH holds tx at 1'b1 from STOP_BIT. Not a bug.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W497_undriven",
+      "line": 20,
+      "reason": "mem is driven by the always_ff block at line 40 (mem[wr_ptr] <= wr_data). The analyzer is incorrectly treating the memory array as undriven. Array element writes are valid drivers.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 61,
+      "reason": "The case expression '{wr_en && !full, rd_en && !empty}' is a 2-bit concatenation of two 1-bit boolean results. The case item 2'b10 is also 2 bits. Both are 2-bit, so there is no width mismatch. The analyzer is incorrectly computing the expression width.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 64,
+      "reason": "Same as above \u2014 case expression '{wr_en && !full, rd_en && !empty}' is 2 bits and 2'b01 is 2 bits. No real width mismatch.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STRUCT_self_assign",
+      "line": 68,
+      "reason": "The default branch 'count <= count' is an explicit hold idiom in a case statement within an always_ff block. This is standard RTL practice to make intent explicit and avoid unintended latches/warnings from other tools. It is not a real bug.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STRUCT_deep_nesting",
+      "line": 29,
+      "reason": "The nesting is: always_ff -> if/else -> if(wr_en&&!full) -> if(wr_ptr==DEPTH-1), which is at most 4 levels. A depth of 6 as reported is an overcounting by the tool. The structure is standard and readable for a FIFO implementation.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "line": 62,
+      "reason": "count is declared as [ADDR_WIDTH:0] \u2014 that is ADDR_WIDTH+1 bits, which is exactly $clog2(DEPTH)+1 bits. This is intentionally one bit wider than the address to hold values 0..DEPTH without overflow. The full/empty flags are derived from count==DEPTH and count==0, so overflow is structurally prevented by the full guard on writes and empty guard on reads.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
+      "line": 79,
+      "reason": "count is declared with ADDR_WIDTH+1 bits, wide enough to represent all values 0..DEPTH without wrap. The comparison count==DEPTH is safe because full prevents count from exceeding DEPTH.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
+      "line": 80,
+      "reason": "Same rationale \u2014 count==0 is safe; empty prevents decrement below 0.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "line": 62,
+      "reason": "count is guarded: it only increments when !full (i.e., count < DEPTH) and only decrements when !empty (i.e., count > 0). It is bounded by construction. Not a real finding.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 22,
+      "reason": "wr_ptr is read at lines 40 (mem[wr_ptr] <= wr_data), 42 (wr_ptr == DEPTH-1), and 45 (wr_ptr + 1'b1). It is clearly used. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 23,
+      "reason": "rd_ptr is read at lines 50 (mem[rd_ptr]), 52 (rd_ptr == DEPTH-1), and 55 (rd_ptr + 1'b1). It is clearly used. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 24,
+      "reason": "count is read at lines 59 (case conditions via full/empty which read count at lines 79-80), 62, 65, and 68. It is clearly used. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_MULTI_DRIVER_SELF_ASSIGN_FF_BLOCK",
+      "line": 29,
+      "reason": "There is only one always_ff block in this module (line 29). The count <= count on line 68 is a case default branch within that single block. There is no second always_ff block \u2014 there is no multi-driver situation at all. This is a completely false positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FF_MULTI_DRIVER_SELF_ASSIGN_NO_RESET",
+      "line": 29,
+      "reason": "Same as above \u2014 there is only one always_ff block. The self-assign in the case default is inside the same block as the reset logic. No multi-driver conflict exists. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FIFO_PTR_WIDTH_VS_DEPTH_MISMATCH",
+      "line": 22,
+      "reason": "The comparison 'wr_ptr == DEPTH-1' (line 42) and 'rd_ptr == DEPTH-1' (line 52) are between ADDR_WIDTH-1:0 pointers and a parameter expression. In SystemVerilog, the parameter DEPTH is 'int unsigned', so DEPTH-1 is an unsigned int constant. The comparison is widened to the max of the two operands' widths. For DEPTH=16, ADDR_WIDTH=4, ptr is 4 bits and DEPTH-1=15 fits in 4 bits \u2014 no real mismatch or simulation/synthesis discrepancy occurs in practice for any power-of-2 DEPTH. For non-power-of-2 DEPTH, ADDR_WIDTH=$clog2(DEPTH) still provides enough bits to represent DEPTH-1. This is a spurious width warning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 83,
+      "reason": "Already waived in prior instances \u2014 missing endmodule label is cosmetic only with zero functional or synthesis impact.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W402_latch_inferred",
+      "line": 30,
+      "reason": "idx is assigned unconditionally at line 30 (idx = pointer + i) on every iteration of the for loop before any conditional use. The if(idx >= N) at line 32 is a correction, and since idx is always assigned before the if, no latch is inferred. The always_comb block also has default assignments at lines 25-26 for the other signals.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SYNTH_12608_latch",
+      "line": 32,
+      "reason": "next_grant has a default assignment of '0 at line 25, and next_pointer has a default assignment of 'pointer' at line 26. Both signals are fully covered by their defaults before the conditional logic, so no latch is inferred for either signal.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STYLE_endmod_label",
+      "line": 63,
+      "reason": "Already waived in prior instances \u2014 missing endmodule label is cosmetic only with zero functional or synthesis impact.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 13,
+      "reason": "pointer is read at line 30 (idx = pointer + i) and line 26 (next_pointer = pointer). It is clearly used in the module body. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 14,
+      "reason": "next_pointer is read at line 57 (pointer <= next_pointer) in the always_ff block. It is clearly used. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_WRITTEN_SIGNAL_NOT_OUTPUT_AND_NOT_READ",
+      "line": 15,
+      "reason": "next_grant is read at line 58 (grant <= next_grant) in the always_ff block, and also read at line 35 in the condition (next_grant == '0). It is clearly used. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_INTEGER_LOOP_VAR_IN_PARAMETERIZED_MODULE",
+      "line": 17,
+      "reason": "While 'integer' is signed 32-bit, its use here is safe in practice. 'i' ranges 0..N-1 and 'idx' is computed as 'pointer + i' then range-checked (idx >= N -> idx -= N). The bit-select req[idx] uses a signed integer index, but since idx is always in [0, N-1] after the bounds check, and N is bounded by the 32-bit integer range, there is no real risk of negative or out-of-range indexing. The concern about signed-vs-unsigned mismatch in bit-selects is theoretical here. That said, using 'int unsigned' or 'logic [$clog2(N):0]' for idx would be better style \u2014 so it is a weak style warning at most, not a functional bug.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_RR_ARBITER_POINTER_NONPOW2_WRAP_RISK",
+      "line": 11,
+      "reason": "The pointer wrap IS explicitly handled in the combinational always_comb block. Line 38-41 checks 'if (idx == N-1) next_pointer = 0; else next_pointer = idx + 1'. The pointer is only ever written from next_pointer (line 57), and next_pointer is only updated when a grant is issued, defaulting to 'pointer' otherwise. The wrap logic is correct and bounded. The rule fires because the sequential block has no explicit bounds check on pointer < N, but the combinational logic guarantees next_pointer is always in [0, N-1], so the sequential register can never go out of range. This is a false positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W528_unused_signal",
+      "line": 106,
+      "reason": "state_n is assigned in the always_comb block (lines 277-295) and read in the always_ff block at line 121 (state <= state_n). It is clearly both written and read.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 176,
+      "reason": "These duplicate case findings (lines 176-259) are false positives. The analyzer is treating all case(quadrant) items across different outer case(state) branches as duplicates of each other. Each case(quadrant) is nested inside a different arm of the outer case(state) \u2014 they are independent case statements in separate scopes, not duplicates.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 177,
+      "reason": "Same as above \u2014 nested case(quadrant) inside case(state) S_ADDR is not a duplicate of the one in S_START.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 178,
+      "reason": "Same false positive reasoning \u2014 independent nested case statements, not duplicates.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 179,
+      "reason": "Same false positive reasoning \u2014 independent nested case statements, not duplicates.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 190,
+      "reason": "Same \u2014 nested case(quadrant) inside S_ADDR_ACK scope, not a duplicate of any other scope.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 191,
+      "reason": "Same false positive \u2014 independent nested case in S_ADDR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 192,
+      "reason": "Same false positive \u2014 independent nested case in S_ADDR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 193,
+      "reason": "Same false positive \u2014 independent nested case in S_ADDR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 204,
+      "reason": "Same false positive \u2014 nested case(quadrant) inside S_WR_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 205,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 206,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 207,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 218,
+      "reason": "Same false positive \u2014 nested case(quadrant) inside S_WR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 219,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 220,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 221,
+      "reason": "Same false positive \u2014 independent nested case in S_WR_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 228,
+      "reason": "Same false positive \u2014 nested case(quadrant) inside S_RD_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 229,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 230,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 231,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_DATA.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 242,
+      "reason": "Same false positive \u2014 nested case(quadrant) inside S_RD_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 243,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 244,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 248,
+      "reason": "Same false positive \u2014 independent nested case in S_RD_ACK.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 256,
+      "reason": "Same false positive \u2014 nested case(quadrant) inside S_STOP.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 257,
+      "reason": "Same false positive \u2014 independent nested case in S_STOP.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 258,
+      "reason": "Same false positive \u2014 independent nested case in S_STOP.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "W_duplicate_case",
+      "line": 259,
+      "reason": "Same false positive \u2014 independent nested case in S_STOP.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 166,
+      "reason": "The inner case expression is 'quadrant' which is declared as logic [1:0] \u2014 2 bits. The case items (2'd0..2'd3) are also 2-bit literals. The analyzer is incorrectly reporting the outer case(state) width (4 bits) as the context for the inner case. Each inner case(quadrant) is independently 2-bit matched against 2-bit items. Not a real width mismatch.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 167,
+      "reason": "Same false positive \u2014 case(quadrant) is 2-bit matched against 2-bit items, not 4-bit.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 168,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 169,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 176,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 177,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 178,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 179,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 190,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 191,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 192,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 193,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 204,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 205,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 206,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 207,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 218,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 219,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 220,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 221,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 228,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 229,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 230,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 231,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 242,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 243,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 244,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 248,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 256,
+      "reason": "Same false positive \u2014 nested case(quadrant) items correctly match 2-bit expression.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 257,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 258,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_case_width",
+      "line": 259,
+      "reason": "Same false positive reasoning.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FSM_unreachable",
+      "line": 93,
+      "reason": "All states are reachable from S_IDLE via normal operation. The analyzer likely failed to trace the next-state logic in the always_comb block (lines 277-295) which explicitly provides S_IDLE -> S_START -> S_ADDR -> ... transitions. This is a false positive due to analyzer not resolving the combinational next-state logic correctly.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SIM_force_release",
+      "line": 177,
+      "reason": "Line 177 is 'scl_out_en <= 1'b0;' inside S_ADDR quadrant 2'd1. There is no 'release' statement anywhere in the design. The analyzer is misidentifying a normal non-blocking assignment as a 'release' statement. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SIM_force_release",
+      "line": 190,
+      "reason": "Line 190 is 'sda_out_en <= 1'b0;' inside S_ADDR_ACK quadrant 2'd0. No 'release' statement present. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SIM_force_release",
+      "line": 191,
+      "reason": "Line 191 is 'scl_out_en <= 1'b0;' inside S_ADDR_ACK quadrant 2'd1. No 'release' statement. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "SIM_force_release",
+      "line": 228,
+      "reason": "Line 228 is 'sda_out_en <= 1'b0;' inside S_RD_DATA quadrant 2'd0. No 'release' statement. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "PWR_large_mux",
+      "line": 145,
+      "reason": "The outer case(state) has 10 arms (S_IDLE through S_DONE plus default), not 42. The 42-arm count is likely the tool summing all nested case arms across all states incorrectly. Not a real 42-arm mux.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_reduction_1bit",
+      "line": 88,
+      "reason": "The expression '~scl_out_en' is a bitwise NOT on a 1-bit logic signal, used to test if SCL is released (not driven low). This is standard RTL practice \u2014 a single-bit inversion is both meaningful and correct in this context. Not a bug.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "line": 16,
+      "reason": "CLK_FREQ_HZ is used as a dividend in localparam arithmetic (line 45: DIVIDER = CLK_FREQ_HZ / (I2C_FREQ_HZ * 4)), and the comparison on line 56 uses DIVIDER[DIV_CNT_W-1:0] which is a part-select, not a signed comparison. The localparam DIVIDER is a compile-time constant; no runtime signed/unsigned mismatch occurs.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "line": 17,
+      "reason": "I2C_FREQ_HZ is only used in the localparam expression at line 45 as a compile-time constant. No runtime signed comparison with unsigned logic occurs.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "STRUCT_self_assign",
+      "line": 78,
+      "reason": "The 'count <= count' in the default branch of a case statement within always_ff is an explicit hold idiom, not a bug. It is the standard way to express 'no change' for the simultaneous write+read (2'b11) and no-operation (2'b00) cases. Already waived in prior instances (STRUCT_self_assign line 68).",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_MULTI_DRIVER_SELF_ASSIGN_FF_BLOCK",
+      "line": 71,
+      "reason": "There is only one always_ff block driving 'count' in this module (line 71). The self-assign on line 78 is a case default branch inside that same block. There is no second always_ff block driving count, so there is no multi-driver conflict. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_WIDTH_OVERFLOW_RISK",
+      "line": 76,
+      "reason": "count is declared as [$clog2(DEPTH):0] = [4:0], which is 5 bits and can hold values 0..31. DEPTH=16 is the maximum, which fits in 5 bits. The increment is guarded by wr_valid (which checks !full, i.e., count < DEPTH), so count can never exceed DEPTH=16. No overflow risk.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
+      "line": 76,
+      "reason": "The increment is gated by wr_valid = wr_en && !full, and full = (count == DEPTH). So count is bounded to [0..DEPTH]. This is equivalent to saturation; the counter does have a max bound via the full flag. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
+      "line": 86,
+      "reason": "count is a DEPTH+1-bit wide signal ([$clog2(DEPTH):0]) intentionally sized to hold 0..DEPTH. The comparison count==DEPTH is safe; count is already bounded by the full/empty guards. No saturation risk. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
+      "line": 88,
+      "reason": "Same reasoning as line 86. count is bounded, and the comparison count >= ALMOST_FULL_THRESH is safe. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "line": 10,
+      "reason": "DATA_WIDTH is used only as a vector width parameter in port declarations and memory declarations, not in runtime signed arithmetic or comparison with unsigned logic. No runtime signed/unsigned mismatch.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "line": 11,
+      "reason": "DEPTH is used in $clog2(DEPTH) and as a part-select width in the assign statements. The part-select form DEPTH[$clog2(DEPTH):0] is a compile-time constant expression; no runtime signed comparison issue.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "line": 13,
+      "reason": "ALMOST_EMPTY_THRESH=2 is used in a compile-time constant expression ALMOST_EMPTY_THRESH[$clog2(DEPTH):0] as a part-select/truncation. No runtime signed vs. unsigned comparison issue exists here.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FIFO_CLOG2_ZERO_WIDTH_RISK",
+      "line": 33,
+      "reason": "With resolved DEPTH=16, $clog2(16)=4, so ADDR_W=4. This is a valid non-zero width. The risk only applies when DEPTH could be 1, which is not a realistic parameterization for a FIFO and is addressed as a corner case. As reported, with the resolved parameter, there is no issue.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "FUNC_unsigned_sub",
+      "line": 77,
+      "reason": "count - 1 is guarded by rd_valid = rd_en && !empty, and empty = (count == 0). So count is always >= 1 when the subtraction occurs. No underflow is possible. False positive.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_ASYNC_RESET_OUTPUT_REG_IN_RESET_CONE",
+      "line": 58,
+      "reason": "Resetting rd_data to '0 on async reset is a standard, safe RTL practice. Output registers are commonly included in the reset cone. The 'glitch' concern is overstated for a synchronous FIFO where rd_data is consumed only when rd_valid is acknowledged. This is an informational style note at best, not a bug.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FIFO_ALMOST_EMPTY_INCLUDES_EMPTY",
+      "line": 89,
+      "reason": "almost_empty subsuming empty (count==0) is a common and intentional FIFO design choice. Many downstream consumers use almost_empty as an early-warning that includes empty. This is a design decision, not a bug. Already waived in prior instances.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FIFO_PART_SELECT_PARAM_COMPARISON",
+      "line": 86,
+      "reason": "With DEPTH=16 (power of 2) and count declared as [$clog2(DEPTH):0] = [4:0], the part-select DEPTH[$clog2(DEPTH):0] = 16[4:0] = 5'b10000 = 16 is correct and matches the count width exactly. Already waived in prior instances for identical pattern.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "LEARNED_FIFO_SIMULTANEOUS_RW_CASE_DEFAULT_COMMENT_ONLY",
+      "line": 75,
+      "reason": "The default branch handles both 2'b00 (hold) and 2'b11 (net-zero simultaneous R+W) and assigns count <= count in both sub-cases. The behavior is functionally identical for both \u2014 count is unchanged. The comment correctly describes the intent. No functional bug exists.",
+      "file_pattern": "",
+      "message_pattern": ""
+    },
+    {
+      "rule": "RDC_no_filter",
+      "line": 16,
+      "reason": "This is a single-clock synchronous FIFO. rst_n is an asynchronous active-low reset used in a single clock domain. There is no clock domain crossing. The RDC finding about synchronizer filters is not applicable to a single-domain reset.",
+      "file_pattern": "",
+      "message_pattern": ""
     }
   ],
   "learned_rules": [
@@ -37,7 +1199,16 @@
       "check_type": "regex",
       "pattern": "count\\s*<=\\s*count\\s*\\+\\s*1",
       "severity": "warning",
-      "message": "Detect counters that increment without saturation logic or overflow detection when WIDTH is a parameter, ensuring downstream logic accounts for wrap-around."
+      "message": "Detect counters that increment without saturation logic or overflow detection when WIDTH is a parameter, ensuring downstream logic accounts for wrap-around.",
+      "stats": {
+        "hits": 14,
+        "waived": 10,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.286
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 29% after 14 hits (10 waived, 0 overlap)"
     },
     {
       "name": "LEARNED_COUNTER_USED_IN_COMPARISON_WITHOUT_SATURATION",
@@ -46,7 +1217,16 @@
       "check_type": "regex",
       "pattern": "count\\s*==\\s*[A-Za-z0-9_]+|count\\s*>=\\s*[A-Za-z0-9_]+",
       "severity": "warning",
-      "message": "Detect when a parameterized counter's output is compared to a constant or parameter value (e.g., count == MAX_VAL or count >= THRESHOLD) without saturation or overflow guard logic. If WIDTH allows count to wrap before reaching the comparison target, the comparison may never be true."
+      "message": "Detect when a parameterized counter's output is compared to a constant or parameter value (e.g., count == MAX_VAL or count >= THRESHOLD) without saturation or overflow guard logic. If WIDTH allows count to wrap before reaching the comparison target, the comparison may never be true.",
+      "stats": {
+        "hits": 28,
+        "waived": 20,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.286
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 29% after 28 hits (20 waived, 0 overlap)"
     },
     {
       "name": "LEARNED_COUNTER_NO_MAX_BOUND_OR_SATURATION",
@@ -55,7 +1235,16 @@
       "check_type": "regex",
       "pattern": "count\\s*<=\\s*count\\s*\\+",
       "severity": "info",
-      "message": "Detect parameterized counters that increment unconditionally (when enabled) and have no explicit saturation assignment (e.g., count <= MAX or count <= '1) and no comparison to a maximum value that would stop or reset the counter before wrap."
+      "message": "Detect parameterized counters that increment unconditionally (when enabled) and have no explicit saturation assignment (e.g., count <= MAX or count <= '1) and no comparison to a maximum value that would stop or reset the counter before wrap.",
+      "stats": {
+        "hits": 14,
+        "waived": 10,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.286
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 29% after 14 hits (10 waived, 0 overlap)"
     },
     {
       "name": "LEARNED_STYLE_RESET_TYPE_UNDOCUMENTED",
@@ -63,8 +1252,697 @@
       "rationale": "Synchronous vs asynchronous reset is a common source of design bugs and mismatches between RTL and intent. A generic counter or any sequential element missing an explicit comment or coding convention marker for reset type can cause subtle initialization failures in simulation and silicon.",
       "check_type": "regex",
       "pattern": "always_ff\\s*@\\s*\\(posedge\\s+clk\\s*\\)[^;]*if\\s*\\(\\s*rst\\s*\\)",
+      "severity": "info",
+      "message": "Detect always_ff blocks that use synchronous reset (rst checked inside the block body with no rst in the sensitivity list) without a comment indicating that synchronous reset is intentional.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_OVERFLOW_FLAG_TIMING_MISMATCH",
+      "description": "Detect when a combinational overflow/carry signal is generated by comparing a registered counter to its maximum value (all-ones or a parameter MAX), and the counter also increments in an always_ff block. Flag that the combinational flag is asserted one cycle before the actual wrap, which is a common off-by-one timing bug.",
+      "rationale": "A counter that compares count == MAX_VALUE combinationally will assert the flag while the counter is still AT max, not after it wraps. Downstream logic that treats this as 'wrap has occurred' will be off by one cycle. This is a subtle but frequent functional bug in counter-based state machines and protocol engines.",
+      "check_type": "regex",
+      "pattern": "count\\s*==\\s*\\{\\s*\\w+\\s*\\{\\s*1'b1\\s*\\}\\s*\\}|count\\s*==\\s*[A-Z_]+\\s*-\\s*1",
       "severity": "warning",
-      "message": "Detect always_ff blocks that use synchronous reset (rst checked inside the block body with no rst in the sensitivity list) without a comment indicating that synchronous reset is intentional."
+      "message": "Detect when a combinational overflow/carry signal is generated by comparing a registered counter to its maximum value (all-ones or a parameter MAX), and the counter also increments in an always_ff block. Flag that the combinational flag is asserted one cycle before the actual wrap, which is a common off-by-one timing bug.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_BLOCK_MISSING_DEFAULT_ASSIGNMENT",
+      "description": "Detect always_comb blocks that contain conditional assignments (if/case) to an output signal without a default assignment at the top of the block or a complete else/default branch covering all cases. Flag any output signal in an always_comb block that is not assigned on every possible execution path.",
+      "rationale": "Missing default assignments in always_comb blocks cause latch inference in synthesis, which is almost always unintentional in combinational logic. This is a frequent and high-impact RTL bug that leads to timing hazards, glitchy outputs, and area overhead. The W402_latch_inferred warning above is a symptom of this pattern.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s*begin(?:(?!always_comb|endmodule).)*?if\\s*\\([^)]+\\)(?:(?!else|always_comb|endmodule).)*?end",
+      "severity": "warning",
+      "message": "Detect always_comb blocks that contain conditional assignments (if/case) to an output signal without a default assignment at the top of the block or a complete else/default branch covering all cases. Flag any output signal in an always_comb block that is not assigned on every possible execution path.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_OUTPUT_NO_ELSE_BRANCH",
+      "description": "Detect always_comb blocks where an if statement assigns to a signal in the if-body but has no corresponding else branch and no prior default assignment for that signal, indicating a latch will be synthesized for that signal.",
+      "rationale": "A single-branch if in always_comb without a default is the canonical latch inference scenario. Static analysis should catch this before synthesis to prevent unintended sequential elements in combinational logic.",
+      "check_type": "regex",
+      "pattern": "always_comb\\b[^;]*begin[^e]*?\\bif\\s*\\([^)]+\\)\\s*\\w+\\s*=\\s*[^;]+;\\s*end",
+      "severity": "error",
+      "message": "Detect always_comb blocks where an if statement assigns to a signal in the if-body but has no corresponding else branch and no prior default assignment for that signal, indicating a latch will be synthesized for that signal.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_OVERFLOW_SIGNAL_PERMANENTLY_ASSERTED_RISK",
+      "description": "Detect designs where a combinational overflow/flag signal is set inside an always_comb block with no reset/clear path (no else, no default), AND the triggering condition (e.g., count == max) becomes false after the counter wraps. The flag can latch permanently if synthesis infers a latch.",
+      "rationale": "When a status flag like 'overflow' is driven combinationally from a counter comparison with no else/default, and the counter wraps past the comparison value, the latch retains the asserted value permanently. This causes downstream logic to malfunction silently \u2014 harder to catch than a missing else alone because it requires understanding counter wrap behavior.",
+      "check_type": "regex",
+      "pattern": "if\\s*\\(\\s*count\\s*==\\s*\\{[^}]+\\}\\s*\\)\\s*overflow\\s*=\\s*1",
+      "severity": "error",
+      "message": "Detect designs where a combinational overflow/flag signal is set inside an always_comb block with no reset/clear path (no else, no default), AND the triggering condition (e.g., count == max) becomes false after the counter wraps. The flag can latch permanently if synthesis infers a latch.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_LATCH_NO_RESET_PATH",
+      "description": "Detect always_comb blocks that infer a latch (missing default/else) for a signal that is also expected to be cleared by an external reset, particularly when a corresponding always_ff block resets related state. The latch has no reset input, so system reset will not clear the latched output.",
+      "rationale": "A common design bug is pairing a resettable always_ff counter/register with a combinational flag derived from it via a latch. After reset, the counter clears but the latched flag retains its pre-reset value, breaking reset correctness. This is a functional bug distinct from the general latch-inference warning.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin(?:(?!always_comb|endmodule).)*?if\\s*\\([^)]+\\)\\s*\\w+\\s*=\\s*1(?:(?!else|\\w+\\s*=\\s*0).)*?end",
+      "severity": "warning",
+      "message": "Detect always_comb blocks that infer a latch (missing default/else) for a signal that is also expected to be cleared by an external reset, particularly when a corresponding always_ff block resets related state. The latch has no reset input, so system reset will not clear the latched output.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_OVERFLOW_FLAG_NO_DEASSERT_PATH",
+      "description": "Detect overflow/flag signals assigned in always_comb blocks where the assignment only covers the asserted case (flag=1) with no corresponding de-assertion path (no else, no default assignment of 0). This causes the flag to latch high permanently after first assertion.",
+      "rationale": "Overflow, error, and status flags intended as combinational indicators are frequently written with only the assert condition, omitting the de-assert path. This silently infers a latch that permanently holds the flag high after first trigger, which is almost never the intended behavior and is a functional bug.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin\\s*(?!\\s*\\w+\\s*=\\s*1'b0)\\s*if\\s*\\([^)]*\\)\\s*(?:overflow|error|flag|done|full|empty)\\s*=\\s*1[^;]*;\\s*end",
+      "severity": "error",
+      "message": "Detect overflow/flag signals assigned in always_comb blocks where the assignment only covers the asserted case (flag=1) with no corresponding de-assertion path (no else, no default assignment of 0). This causes the flag to latch high permanently after first assertion.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_MULTI_DRIVER_ALWAYS_FF",
+      "description": "Detect when the same signal name appears as an LHS assignment target in two or more separate always_ff blocks within the same module. Multiple always_ff drivers on the same signal are illegal in synthesizable RTL and cause non-deterministic behavior in simulation.",
+      "rationale": "Multi-driver always_ff blocks are a critical RTL bug that synthesis tools may reject or handle non-deterministically. Static detection by scanning for repeated LHS identifiers across always_ff blocks catches this before simulation.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@[^;]+begin(?:[^e]|e(?!nd))*?\\b(\\w+)\\s*<=(?:(?!always_ff|endmodule).)*always_ff\\s*@[^;]+begin(?:[^e]|e(?!nd))*?\\b\\1\\s*<=",
+      "severity": "error",
+      "message": "Detect when the same signal name appears as an LHS assignment target in two or more separate always_ff blocks within the same module. Multiple always_ff drivers on the same signal are illegal in synthesizable RTL and cause non-deterministic behavior in simulation.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COUNTER_WIDTH_DEPTH_MISMATCH",
+      "description": "Detect when a counter signal is compared to a DEPTH or MAX parameter (e.g., count == DEPTH) but the counter's declared bit-width [WIDTH-1:0] may be insufficient to represent the DEPTH value (i.e., DEPTH >= 2^WIDTH is possible). Flag when counter width is parameterized by a different parameter than the comparison target.",
+      "rationale": "If a FIFO or buffer counter is WIDTH bits wide but compared to DEPTH, and DEPTH can be >= 2^WIDTH, the comparison is never true, silently disabling full/overflow detection. This is a common parameterization bug.",
+      "check_type": "regex",
+      "pattern": "logic\\s*\\[\\s*(\\w+)\\s*-\\s*1\\s*:\\s*0\\s*\\]\\s*(count|ptr|wr_ptr|rd_ptr)[^;]*;(?:(?!endmodule).)*\\bcount\\s*==\\s*(?!\\{)([A-Z_][A-Z0-9_]*)",
+      "severity": "warning",
+      "message": "Detect when a counter signal is compared to a DEPTH or MAX parameter (e.g., count == DEPTH) but the counter's declared bit-width [WIDTH-1:0] may be insufficient to represent the DEPTH value (i.e., DEPTH >= 2^WIDTH is possible). Flag when counter width is parameterized by a different parameter than the comparison target.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_NEXT_STATE_NO_DEFAULT_HOLD",
+      "description": "Detect always_comb blocks that compute a next-state signal for a registered signal (e.g., next_count, next_state) but have no default assignment at the top of the block. When all conditional branches use the registered signal name on the RHS (e.g., 'count + 1'), the missing default means the latch infers the previous combinational value rather than the registered hold value, causing the FF to see stale/glitching data on idle cycles.",
+      "rationale": "This is a common FIFO/counter bug: the designer intends 'hold current value when idle' but omits the default, inferring a latch instead of a clean feedback path. The latch vs. register timing mismatch causes simulation/synthesis divergence. Standard latch detection catches this, but this rule specifically targets next-state variables fed into always_ff to flag the higher-severity consequence.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin(?:(?!always_comb|endmodule).)*?\\bif\\s*\\([^)]+\\)\\s*\\bnext_\\w+\\s*=",
+      "severity": "warning",
+      "message": "Detect always_comb blocks that compute a next-state signal for a registered signal (e.g., next_count, next_state) but have no default assignment at the top of the block. When all conditional branches use the registered signal name on the RHS (e.g., 'count + 1'), the missing default means the latch infers the previous combinational value rather than the registered hold value, causing the FF to see stale/glitching data on idle cycles.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FF_UNCONDITIONAL_NEXT_LOAD",
+      "description": "Detect always_ff blocks where a registered signal is unconditionally loaded from a combinational 'next_' variable (no conditional hold) while the combinational block computing that next_ variable has an incomplete assignment (latch). The unconditional load means every latch glitch on next_ propagates into the register.",
+      "rationale": "When a designer writes 'count <= next_count' unconditionally in an always_ff else branch, and next_count is latch-inferred, every idle cycle loads a potentially glitching value. This specific combination (unconditional FF load of latch-inferred comb signal) is more dangerous than a latch in isolation and deserves a targeted rule.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@[^;]+begin(?:(?!always_ff|endmodule).)*?\\belse\\b(?:(?!always_ff|endmodule).)*?\\b(\\w+)\\s*<=\\s*next_\\1\\s*;",
+      "severity": "error",
+      "message": "Detect always_ff blocks where a registered signal is unconditionally loaded from a combinational 'next_' variable (no conditional hold) while the combinational block computing that next_ variable has an incomplete assignment (latch). The unconditional load means every latch glitch on next_ propagates into the register.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_HARDCODED_WIDTH_IN_PARAMETERIZED_MODULE",
+      "description": "Detect hardcoded numeric literals used as vector sizes or one-hot values in modules that declare at least one parameter (e.g., parameter N). Flags cases like next_grant = 4'b0001 when grant is declared as logic [N-1:0].",
+      "rationale": "When a module is parameterized (e.g., N requesters), using hardcoded bit-widths or one-hot constants makes the module non-portable and silently incorrect when N is changed. The hardcoded width should instead use the parameter.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+\\w+\\s*=\\s*\\d+[^;]*;(?:(?!endmodule).)*?=\\s*\\d+'[bBoOdDhH][0-9a-fA-FxXzZ_]+",
+      "severity": "warning",
+      "message": "Detect hardcoded numeric literals used as vector sizes or one-hot values in modules that declare at least one parameter (e.g., parameter N). Flags cases like next_grant = 4'b0001 when grant is declared as logic [N-1:0].",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_BLOCK_INCOMPLETE_PRIORITY_CHAIN",
+      "description": "Detect always_comb blocks that implement a priority chain (if/else-if) where the number of conditions is less than the number of bits in the input vector being tested. For example, testing req[0], req[1], req[2] of a 4-bit req signal without a branch for req[3].",
+      "rationale": "An incomplete priority chain silently omits handling of some input combinations, either inferring a latch (holding previous value) or leaving outputs undefined for those cases. This is a common bug in arbiter and encoder designs.",
+      "check_type": "regex",
+      "pattern": "if\\s*\\(\\s*\\w+\\[\\d+\\]\\s*\\)(?:\\s*\\w+\\s*=\\s*[^;]+;\\s*else\\s+if\\s*\\(\\s*\\w+\\[\\d+\\]\\s*\\))+(?!\\s*else)",
+      "severity": "warning",
+      "message": "Detect always_comb blocks that implement a priority chain (if/else-if) where the number of conditions is less than the number of bits in the input vector being tested. For example, testing req[0], req[1], req[2] of a 4-bit req signal without a branch for req[3].",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_HARDCODED_ONEHOT_IN_PARAMETERIZED_ARBITER",
+      "description": "Detect always_comb or always blocks in parameterized modules (parameter N or WIDTH) where output signals are assigned hardcoded bit-width literals (e.g., 4'b0001, 4'b0010) instead of parameterized expressions (e.g., N'(1 << i) or {{N-1{1'b0}}, 1'b1}). This indicates the design will silently break when N is changed.",
+      "rationale": "Hardcoded one-hot literals in parameterized modules are a common source of silent functional bugs when parameters are swept. Synthesis tools may truncate or zero-extend without warning, producing incorrect grant/select vectors.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+N\\s*=\\s*\\d+[^;]*;(?:(?!endmodule).)*?=\\s*\\d+'b[01]+",
+      "severity": "warning",
+      "message": "Detect always_comb or always blocks in parameterized modules (parameter N or WIDTH) where output signals are assigned hardcoded bit-width literals (e.g., 4'b0001, 4'b0010) instead of parameterized expressions (e.g., N'(1 << i) or {{N-1{1'b0}}, 1'b1}). This indicates the design will silently break when N is changed.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FF_BLOCK_NO_RESET_WHILE_PEER_HAS_RESET",
+      "description": "Detect modules with two or more always_ff blocks where at least one block has a reset condition (if rst) but another always_ff block in the same module driving the same or related signals does not have a reset path.",
+      "rationale": "When one always_ff has reset and a peer does not, the design has inconsistent reset behavior. After deassertion of reset, signals from the non-reset block may still hold X or stale values, causing simulation/synthesis divergence.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@[^;]+begin(?:(?!if\\s*\\(\\s*!?\\s*rst).)*?\\b(\\w+)\\s*<=(?:(?!always_ff|endmodule).)*?always_ff\\s*@[^;]+begin(?:(?!if\\s*\\(\\s*!?\\s*rst|endmodule).)*?\\1\\s*<=",
+      "severity": "warning",
+      "message": "Detect modules with two or more always_ff blocks where at least one block has a reset condition (if rst) but another always_ff block in the same module driving the same or related signals does not have a reset path.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_APB_PREADY_MISSING_PENABLE_GATE",
+      "description": "Detect always_comb blocks that assign pready based solely on psel without also gating on penable. In APB protocol, pready is only meaningful during the access phase (psel && penable). Asserting pready during setup phase (psel only) can cause masters to skip the access phase.",
+      "rationale": "A common APB slave bug is to assert pready on psel alone. This violates the APB specification and can cause transactions to be dropped silently. A static check for `if (psel)` assigning pready=1 without penable in the condition would catch this class of bug.",
+      "check_type": "regex",
+      "pattern": "if\\s*\\(\\s*psel\\s*\\)\\s*\\n?\\s*pready\\s*=\\s*1",
+      "severity": "warning",
+      "message": "Detect always_comb blocks that assign pready based solely on psel without also gating on penable. In APB protocol, pready is only meaningful during the access phase (psel && penable). Asserting pready during setup phase (psel only) can cause masters to skip the access phase.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_HARDCODED_ADDR_LITERAL_IN_PARAMETERIZED_MODULE",
+      "description": "Detect always_ff or always_comb blocks in modules with a parameterized ADDR_WIDTH where address comparisons use hardcoded numeric literals (e.g., 8'h00, 8'h04) instead of parameter-width-matched constants. If ADDR_WIDTH changes, the literal width becomes mismatched, causing silent truncation or zero-extension.",
+      "rationale": "Parameterized modules with hardcoded address literal widths are a common source of subtle bugs when the parameter is changed. The comparison still compiles but silently produces wrong decode logic. A rule checking for fixed-width hex/binary literals in address comparisons within parameterized modules would prevent this.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+ADDR_WIDTH\\s*=\\s*\\d+(?:(?!endmodule)[\\s\\S])*?==\\s*\\d+'h[0-9a-fA-F]+",
+      "severity": "warning",
+      "message": "Detect always_ff or always_comb blocks in modules with a parameterized ADDR_WIDTH where address comparisons use hardcoded numeric literals (e.g., 8'h00, 8'h04) instead of parameter-width-matched constants. If ADDR_WIDTH changes, the literal width becomes mismatched, causing silent truncation or zero-extension.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_BLOCK_NO_DEFAULT_MULTIPATH_IF",
+      "description": "Detect always_comb blocks where an output signal is assigned inside a nested if/else-if chain (two or more levels deep) but has no default assignment before the chain AND the innermost chain lacks a final else. This is a stricter variant of latch detection targeting the multi-condition address-decode pattern common in register files.",
+      "rationale": "Nested if/else-if without final else and without default assignment is one of the most common sources of unintended latches in APB/AHB register file read logic. A dedicated rule targeting this specific two-level pattern improves detection precision.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin(?:(?!always_comb|endmodule)[\\s\\S])*?if\\s*\\([^)]+\\)\\s*begin?[\\s\\S]*?if\\s*\\([^)]+\\)[\\s\\S]*?else\\s+if\\s*\\([^)]+\\)(?:(?!else)[\\s\\S])*?end",
+      "severity": "warning",
+      "message": "Detect always_comb blocks where an output signal is assigned inside a nested if/else-if chain (two or more levels deep) but has no default assignment before the chain AND the innermost chain lacks a final else. This is a stricter variant of latch detection targeting the multi-condition address-decode pattern common in register files.",
+      "stats": {
+        "hits": 10,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_MULTI_DRIVER_SELF_ASSIGN_FF_BLOCK",
+      "description": "Detect always_ff blocks where a signal is both driven by a functional always_ff block elsewhere in the module AND also self-assigned (signal <= signal) in a second always_ff block. The self-assigning block is dead code but creates a multi-driver conflict.",
+      "rationale": "Self-assigning second drivers (reg <= reg) appear to be no-ops but cause multi-driver synthesis errors and simulation non-determinism. They are often the result of copy-paste bugs or incomplete refactoring. A rule that combines multi-driver detection with self-assignment detection catches this specific hazardous pattern.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@[^;]+begin(?:(?!always_ff|endmodule)[\\s\\S])*?\\b(\\w+)\\s*<=\\s*\\1\\s*;(?:(?!always_ff|endmodule)[\\s\\S])*?end",
+      "severity": "error",
+      "message": "Detect always_ff blocks where a signal is both driven by a functional always_ff block elsewhere in the module AND also self-assigned (signal <= signal) in a second always_ff block. The self-assigning block is dead code but creates a multi-driver conflict.",
+      "stats": {
+        "hits": 7,
+        "waived": 3,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.571
+      },
+      "status": "disabled",
+      "disable_reason": "Regex cannot verify second driver exists; fires on any always_ff with self-assign"
+    },
+    {
+      "name": "LEARNED_APB_PRDATA_NOT_GATED_ON_ACCESS_PHASE",
+      "description": "Detect APB slave modules where prdata is assigned in an always_comb block but the outermost condition does not include both psel and penable. The APB specification requires that prdata is only driven during the access phase. Missing the penable gate causes prdata to be driven during setup phase or idle, which may corrupt read transactions.",
+      "rationale": "This is a systematic APB protocol compliance issue. Read data must be gated on psel && penable && !pwrite. Missing penable in the read path is a repeatable, detectable bug pattern distinct from the pready-penable rule.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin(?:(?!always_comb|endmodule)[\\s\\S])*?prdata\\s*=",
+      "severity": "warning",
+      "message": "Detect APB slave modules where prdata is assigned in an always_comb block but the outermost condition does not include both psel and penable. The APB specification requires that prdata is only driven during the access phase. Missing the penable gate causes prdata to be driven during setup phase or idle, which may corrupt read transactions.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_APB_PREADY_LATCH_MISSING_ELSE",
+      "description": "Detect always_comb blocks that assign pready only inside an if(psel) or if(psel && penable) branch without a corresponding else branch and without a default assignment before the if. This infers a latch on pready, which can cause pready to remain high after a transaction ends, breaking the APB handshake for subsequent transactions.",
+      "rationale": "A latched pready is both a protocol violation and a timing hazard. After the first transaction, pready stays high and subsequent setup phases are treated as completed access phases. This is a common and dangerous APB slave bug.",
+      "check_type": "regex",
+      "pattern": "always_comb\\s+begin\\s*(?!\\s*pready\\s*=)\\s*if\\s*\\(\\s*psel[^)]*\\)\\s*\\n?\\s*pready\\s*=\\s*1",
+      "severity": "error",
+      "message": "Detect always_comb blocks that assign pready only inside an if(psel) or if(psel && penable) branch without a corresponding else branch and without a default assignment before the if. This infers a latch on pready, which can cause pready to remain high after a transaction ends, breaking the APB handshake for subsequent transactions.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_PARAM_INT_SIGNED_IN_COMPARISON",
+      "description": "Detect modules that declare parameters as 'parameter int' (which is signed in SystemVerilog) and use them in comparisons or arithmetic with unsigned logic signals. This can cause unexpected signed extension or comparison behavior.",
+      "rationale": "In SystemVerilog, 'parameter int' declares a 32-bit signed integer. When compared to an unsigned logic signal, the comparison may be evaluated as signed, which can cause subtle bugs especially when the parameter value is large or when arithmetic is performed (e.g., DATA_BITS-1 could theoretically wrap if DATA_BITS=0). Using 'parameter int unsigned' or 'parameter logic [31:0]' is safer.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+int\\s+(?!unsigned)\\s*(\\w+)\\s*=\\s*\\d+",
+      "severity": "warning",
+      "message": "Detect modules that declare parameters as 'parameter int' (which is signed in SystemVerilog) and use them in comparisons or arithmetic with unsigned logic signals. This can cause unexpected signed extension or comparison behavior.",
+      "stats": {
+        "hits": 177,
+        "waived": 124,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.299
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 30% after 177 hits (124 waived, 0 overlap)"
+    },
+    {
+      "name": "LEARNED_FSM_OUTPUT_REGISTERED_TX_IMPLICIT_HOLD",
+      "description": "Detect always_ff blocks in FSM datapaths where an output port (e.g., tx, data_out) is assigned in some but not all case arms, relying on implicit FF hold for undriven states. Flag when the output is driven in 2 or more states but missing in at least one non-default, non-reset state of the FSM.",
+      "rationale": "Implicit FF hold is valid RTL but can lead to unintended output values if the FSM reaches an unexpected state or if the designer intended to drive the output to a known idle value in all states. Explicit assignments improve readability, synthesis clarity, and prevent confusion during debug.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@[^;]+begin(?:(?!always_ff|endmodule)[\\s\\S])*?case\\s*\\(\\s*state\\s*\\)(?:(?!endcase)[\\s\\S])*?\\btx\\s*<=(?:(?!endcase)[\\s\\S])*?endcase",
+      "severity": "info",
+      "message": "Detect always_ff blocks in FSM datapaths where an output port (e.g., tx, data_out) is assigned in some but not all case arms, relying on implicit FF hold for undriven states. Flag when the output is driven in 2 or more states but missing in at least one non-default, non-reset state of the FSM.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FSM_DONE_PULSE_NO_ACK",
+      "description": "Detect FSM states named FINISH, DONE, or COMPLETE that assert a 'done' or 'valid' output for exactly one cycle and unconditionally transition to IDLE or a reset state without any acknowledgment input port.",
+      "rationale": "A one-cycle done/valid pulse with no acknowledgment handshake is a common source of integration bugs. If the downstream consumer misses the pulse (e.g., due to pipeline latency or clock enable), the transaction completion is lost. Designs should either hold done until acked or clearly document the pulse width requirement.",
+      "check_type": "regex",
+      "pattern": "\\bFINISH\\b[^:]*:\\s*begin(?:(?!end\\b)[\\s\\S])*?\\bdone\\s*=\\s*1(?:(?!end\\b)[\\s\\S])*?\\bnext_state\\s*=\\s*IDLE",
+      "severity": "warning",
+      "message": "Detect FSM states named FINISH, DONE, or COMPLETE that assert a 'done' or 'valid' output for exactly one cycle and unconditionally transition to IDLE or a reset state without any acknowledgment input port.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_UART_EXTRA_LOAD_STATE_BUSY_GAP",
+      "description": "Detect UART or serial transmitter FSMs that have a separate LOAD state between IDLE and START_BIT where busy is not asserted during IDLE even when the start condition is true. This creates a one-cycle gap where start is high but busy is low.",
+      "rationale": "In a transmitter FSM, busy should go high the same cycle start is accepted to prevent the caller from issuing a second start command. If busy is only asserted after entering the LOAD state (next cycle), a one-cycle race condition exists where back-to-back start pulses could be issued.",
+      "check_type": "regex",
+      "pattern": "IDLE[^:]*:[\\s\\S]*?if\\s*\\(\\s*start\\s*\\)[\\s\\S]*?next_state\\s*=\\s*LOAD(?:[\\s\\S]*?)LOAD[^:]*:[\\s\\S]*?START_BIT",
+      "severity": "warning",
+      "message": "Detect UART or serial transmitter FSMs that have a separate LOAD state between IDLE and START_BIT where busy is not asserted during IDLE even when the start condition is true. This creates a one-cycle gap where start is high but busy is low.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FSM_DONE_COMBINATIONAL_REENTRY_RACE",
+      "description": "Detect FSM designs where a terminal state (FINISH, DONE, COMPLETE) asserts a combinational 'done' output AND unconditionally transitions to IDLE in the same cycle, while the IDLE state checks an input (e.g., 'start') that could be already high. This creates a race: done=1 and a new transaction starting on the same cycle.",
+      "rationale": "When done is combinational and asserted for exactly one cycle in a terminal state, and the FSM immediately returns to IDLE where a start condition can re-trigger, a consumer that uses 'done' to gate 'start' may miss the pulse or trigger an unintended back-to-back transaction. This is a common FSM handshake bug.",
+      "check_type": "regex",
+      "pattern": "FINISH[^:]*:\\s*begin(?:(?!end\\b)[\\s\\S])*?done\\s*=\\s*1[^;]*;(?:(?!end\\b)[\\s\\S])*?end[\\s\\S]*?IDLE[^:]*:\\s*begin(?:(?!end\\b)[\\s\\S])*?if\\s*\\(\\s*start\\s*\\)",
+      "severity": "warning",
+      "message": "Detect FSM designs where a terminal state (FINISH, DONE, COMPLETE) asserts a combinational 'done' output AND unconditionally transitions to IDLE in the same cycle, while the IDLE state checks an input (e.g., 'start') that could be already high. This creates a race: done=1 and a new transaction starting on the same cycle.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FSM_COUNTER_INCREMENTED_IN_STATE_AND_COMPARED_IN_SAME_STATE",
+      "description": "Detect always_ff blocks where a counter (bit_cnt, count, etc.) is both incremented (counter <= counter + 1) and compared in the next-state logic always_comb for the same FSM state. The comparison uses the pre-increment value, which may cause an off-by-one in the number of cycles spent in that state.",
+      "rationale": "When a counter is incremented in a registered block and compared combinationally for FSM transition in the same state, designers must carefully account for whether the comparison is on the pre- or post-increment value. This is a common source of off-by-one errors in serial protocol FSMs (UART, SPI, I2C).",
+      "check_type": "regex",
+      "pattern": "(?s)DATA[^:]*:.*?(?:bit_cnt|count)\\s*<=\\s*(?:bit_cnt|count)\\s*\\+.*?DATA[^:]*:.*?if\\s*\\(\\s*(?:bit_cnt|count)\\s*==",
+      "severity": "warning",
+      "message": "Detect always_ff blocks where a counter (bit_cnt, count, etc.) is both incremented (counter <= counter + 1) and compared in the next-state logic always_comb for the same FSM state. The comparison uses the pre-increment value, which may cause an off-by-one in the number of cycles spent in that state.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_ASYNC_RESET_ACTIVE_LOW_MIXED_WITH_PARAM_INT",
+      "description": "Detect modules that use active-low asynchronous reset (negedge rst_n in sensitivity list) combined with 'parameter int' (signed) declarations. The signed parameter may interact unexpectedly with unsigned counter comparisons in the reset-release path.",
+      "rationale": "Active-low async reset with signed parameters is a combination that increases the risk of subtle signed/unsigned comparison bugs, especially in parameterized modules where the parameter is used in counter bounds or loop limits.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@\\s*\\(posedge\\s+clk\\s+or\\s+negedge\\s+rst_n\\)[\\s\\S]*?parameter\\s+int\\s+(?!unsigned)",
+      "severity": "info",
+      "message": "Detect modules that use active-low asynchronous reset (negedge rst_n in sensitivity list) combined with 'parameter int' (signed) declarations. The signed parameter may interact unexpectedly with unsigned counter comparisons in the reset-release path.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FIFO_CLOG2_ZERO_WIDTH_RISK",
+      "description": "Detect FIFO or buffer modules that use $clog2(DEPTH) as an address width without a guard against DEPTH=1 (which produces $clog2(1)=0, a zero-width vector). A zero-width logic declaration is illegal in most synthesis tools.",
+      "rationale": "$clog2(1)=0 creates a [\u22121:0] vector which is a zero or negative width, causing elaboration errors. Parameter constraints or assertions should guard DEPTH >= 2.",
+      "check_type": "regex",
+      "pattern": "localparam\\s+(?:int\\s+(?:unsigned\\s+)?)?\\w+\\s*=\\s*\\$clog2\\s*\\(\\s*DEPTH\\s*\\)",
+      "severity": "warning",
+      "message": "Detect FIFO or buffer modules that use $clog2(DEPTH) as an address width without a guard against DEPTH=1 (which produces $clog2(1)=0, a zero-width vector). A zero-width logic declaration is illegal in most synthesis tools.",
+      "stats": {
+        "hits": 66,
+        "waived": 29,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.561
+      }
+    },
+    {
+      "name": "LEARNED_FIFO_COUNT_WIDTH_ONE_EXTRA_BIT",
+      "description": "Detect FIFO count signals declared as [ADDR_WIDTH:0] (one bit wider than the pointer) and verify that the full condition uses count==DEPTH rather than count=={ADDR_WIDTH+1{1'b1}}. Using the all-ones pattern for full detection is incorrect when DEPTH is not a power of 2.",
+      "rationale": "A common FIFO bug is using count == {(ADDR_WIDTH+1){1'b1}} for the full condition instead of count == DEPTH. When DEPTH is not a power of 2, the all-ones value exceeds DEPTH and the full flag never asserts correctly.",
+      "check_type": "regex",
+      "pattern": "logic\\s*\\[\\s*ADDR_WIDTH\\s*:\\s*0\\s*\\]\\s*count[^;]*;(?:(?!endmodule)[\\s\\S])*?count\\s*==\\s*\\{[^}]*1'b1[^}]*\\}",
+      "severity": "error",
+      "message": "Detect FIFO count signals declared as [ADDR_WIDTH:0] (one bit wider than the pointer) and verify that the full condition uses count==DEPTH rather than count=={ADDR_WIDTH+1{1'b1}}. Using the all-ones pattern for full detection is incorrect when DEPTH is not a power of 2.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_ASYNC_RESET_OUTPUT_REG_IN_RESET_CONE",
+      "description": "Detect always_ff blocks with asynchronous reset (negedge rst_n in sensitivity list) where output ports (declared as 'output logic') are assigned in the reset branch. Resetting output registers asynchronously can cause glitches visible to downstream logic during transient rst_n pulses.",
+      "rationale": "Asynchronous reset of output-facing registers means any glitch on rst_n immediately propagates to downstream logic as a data glitch, not just a reset. This is often unintentional \u2014 designers typically want deterministic reset only at power-on. Flagging outputs in async-reset cones helps designers consciously decide reset topology for outputs.",
+      "check_type": "regex",
+      "pattern": "always_ff\\s*@\\s*\\(posedge\\s+clk\\s+or\\s+negedge\\s+rst_n\\)(?:(?!always_ff|endmodule)[\\s\\S])*?if\\s*\\(!\\s*rst_n\\)(?:(?!else)[\\s\\S])*?\\b(rd_data|data_out|q|dout)\\s*<=\\s*",
+      "severity": "info",
+      "message": "Detect always_ff blocks with asynchronous reset (negedge rst_n in sensitivity list) where output ports (declared as 'output logic') are assigned in the reset branch. Resetting output registers asynchronously can cause glitches visible to downstream logic during transient rst_n pulses.",
+      "stats": {
+        "hits": 17,
+        "waived": 12,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 0.294
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 29% after 17 hits (12 waived, 0 overlap)"
+    },
+    {
+      "name": "LEARNED_INTEGER_LOOP_VAR_IN_PARAMETERIZED_MODULE",
+      "description": "Detect always_comb or always blocks in parameterized modules that use 'integer' (signed 32-bit) as a loop variable or index into a parameterized-width vector, where the index is used in bit-selects or arithmetic with unsigned parameter-width signals.",
+      "rationale": "Using 'integer' for loop variables in parameterized RTL creates signed/unsigned mixing hazards. Comparisons like 'idx >= N' between a signed integer and an unsigned parameter can produce unexpected results if the integer becomes negative. Additionally, assigning an integer to a PTR_W-bit logic signal relies on implicit truncation. Using 'int unsigned' or properly-sized logic variables is safer and more portable.",
+      "check_type": "regex",
+      "pattern": "integer\\s+\\w+\\s*;(?:(?!endmodule)[\\s\\S])*?for\\s*\\(\\s*\\w+\\s*=\\s*0\\s*;\\s*\\w+\\s*<\\s*[A-Z_][A-Z0-9_]*",
+      "severity": "warning",
+      "message": "Detect always_comb or always blocks in parameterized modules that use 'integer' (signed 32-bit) as a loop variable or index into a parameterized-width vector, where the index is used in bit-selects or arithmetic with unsigned parameter-width signals.",
+      "stats": {
+        "hits": 19,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_RR_ARBITER_POINTER_NONPOW2_WRAP_RISK",
+      "description": "Detect round-robin arbiter modules where the pointer width is $clog2(N) and the pointer is advanced by comparison to N-1 (wrapping to 0), but there is no explicit bounds check asserting pointer < N after the sequential update.",
+      "rationale": "When N is not a power of 2, the pointer register can physically represent values 0..2^$clog2(N)-1, which is larger than N-1. If any bug causes the pointer to escape the valid range, the arbiter will stall permanently. An explicit post-update bounds check (if pointer >= N, reset to 0) provides defense in depth.",
+      "check_type": "regex",
+      "pattern": "\\$clog2\\s*\\(\\s*N\\s*\\)(?:(?!endmodule)[\\s\\S])*?next_pointer\\s*=\\s*'0(?:(?!endmodule)[\\s\\S])*?pointer\\s*<=\\s*next_pointer",
+      "severity": "warning",
+      "message": "Detect round-robin arbiter modules where the pointer width is $clog2(N) and the pointer is advanced by comparison to N-1 (wrapping to 0), but there is no explicit bounds check asserting pointer < N after the sequential update.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_COMB_VECTOR_EQUALITY_USED_AS_GRANT_FLAG",
+      "description": "Detect always_comb blocks where a multi-bit grant or output vector is compared to '0 (e.g., next_grant == '0) to determine whether a grant has been issued, instead of using a dedicated single-bit flag. This pattern generates O(N) comparison logic and may obscure intent.",
+      "rationale": "Comparing an N-bit grant vector to all-zeros to check 'no grant yet' inside a for loop synthesizes as an N-input OR gate evaluated on each iteration. A single-bit 'granted' flag is clearer and more synthesis-friendly. This is a style/optimization issue that can become a performance problem at large N.",
+      "check_type": "regex",
+      "pattern": "if\\s*\\(\\s*\\w+\\s*==\\s*'0\\s*\\)\\s*&&\\s*\\w+\\[\\w+\\]",
+      "severity": "warning",
+      "message": "Detect always_comb blocks where a multi-bit grant or output vector is compared to '0 (e.g., next_grant == '0) to determine whether a grant has been issued, instead of using a dedicated single-bit flag. This pattern generates O(N) comparison logic and may obscure intent.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_INTEGER_IDX_ASSIGNED_TO_NARROWER_LOGIC",
+      "description": "Detect always_comb blocks where a 32-bit signed 'integer' variable (used as a loop index or computed address) is assigned to a narrower 'logic [PTR_W-1:0]' signal without explicit truncation cast, when PTR_W is derived from a parameter via $clog2.",
+      "rationale": "Implicit width truncation from a 32-bit signed integer to a narrow parameterized logic vector can cause simulation/synthesis mismatches and tool warnings. Explicit casting makes the intent clear and avoids potential sign-extension artifacts.",
+      "check_type": "regex",
+      "pattern": "integer\\s+\\w+\\s*;(?:(?!endmodule)[\\s\\S])*?logic\\s*\\[\\s*\\w+\\s*-\\s*1\\s*:\\s*0\\s*\\]\\s*next_pointer[^;]*;",
+      "severity": "warning",
+      "message": "Detect always_comb blocks where a 32-bit signed 'integer' variable (used as a loop index or computed address) is assigned to a narrower 'logic [PTR_W-1:0]' signal without explicit truncation cast, when PTR_W is derived from a parameter via $clog2.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_INTEGER_IDX_USED_FOR_VECTOR_BITSELECT_SIGNED",
+      "description": "Detect always_comb blocks where a 32-bit signed 'integer' variable is used as a bit-select index into a vector port (e.g., req[idx], grant[idx]) in a parameterized module, without an explicit cast or range assertion.",
+      "rationale": "Using a signed integer as a bit-select index can produce X in simulation if the value goes negative or out of range, and can confuse synthesis tools. In parameterized modules the tool cannot statically verify the range, making this a latent correctness risk.",
+      "check_type": "regex",
+      "pattern": "integer\\s+\\w+\\s*;(?:(?!endmodule)[\\s\\S])*?\\w+\\[\\s*(?:idx|i)\\s*\\]",
+      "severity": "warning",
+      "message": "Detect always_comb blocks where a 32-bit signed 'integer' variable is used as a bit-select index into a vector port (e.g., req[idx], grant[idx]) in a parameterized module, without an explicit cast or range assertion.",
+      "stats": {
+        "hits": 18,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_ARBITER_POINTER_OUT_OF_RANGE_NO_ASSERT",
+      "description": "Detect round-robin arbiter modules where a pointer signal is declared with PTR_W=$clog2(N) bits and updated by combinational next-pointer logic, but there is no assertion (assert property or immediate assert) that pointer < N anywhere in the module.",
+      "rationale": "For non-power-of-2 N, a $clog2(N)-bit pointer can represent values beyond N-1. If the pointer is ever loaded with an out-of-range value (e.g., due to a reset sequencing issue or synthesis truncation), the round-robin walk will compute out-of-bounds indices, causing stale grants or permanent deadlock. A formal assertion catches this at verification time.",
+      "check_type": "regex",
+      "pattern": "localparam\\s+\\w+\\s*=\\s*\\$clog2\\s*\\(\\s*N\\s*\\)(?:(?!endmodule)[\\s\\S])*?(?!assert)(?:pointer|ptr)\\s*<=\\s*next_pointer",
+      "severity": "warning",
+      "message": "Detect round-robin arbiter modules where a pointer signal is declared with PTR_W=$clog2(N) bits and updated by combinational next-pointer logic, but there is no assertion (assert property or immediate assert) that pointer < N anywhere in the module.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_PARAM_INT_UNSIGNED_LOOP_VAR_MISMATCH",
+      "description": "Detect modules that declare parameters as 'parameter int unsigned' but use 'integer' (signed) loop variables and index computations that are compared against or assigned to those unsigned parameters.",
+      "rationale": "Mixing signed integer loop variables with unsigned parameters in comparisons (e.g., i < N, idx >= N) introduces potential sign-extension issues and lint violations. When N is large enough, signed/unsigned boundary conditions can cause incorrect loop termination or index wrap.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+int\\s+unsigned\\s+N\\s*=\\s*\\d+(?:(?!endmodule)[\\s\\S])*?\\binteger\\b\\s+\\w+\\s*;(?:(?!endmodule)[\\s\\S])*?for\\s*\\(",
+      "severity": "warning",
+      "message": "Detect modules that declare parameters as 'parameter int unsigned' but use 'integer' (signed) loop variables and index computations that are compared against or assigned to those unsigned parameters.",
+      "stats": {
+        "hits": 0,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 137,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FIFO_NONPOW2_DEPTH_NO_ASSERTION",
+      "description": "Detect FIFO modules that declare pointer signals using $clog2(DEPTH)-wide logic (implying power-of-2 wrap behavior) but do not contain a compile-time or simulation-time assertion enforcing that DEPTH is a power of 2. If DEPTH is not a power of 2, the pointer natural wrap-around will be incorrect, producing memory aliasing and wrong full/empty counts.",
+      "rationale": "Power-of-2 FIFOs rely on unsigned pointer overflow for wrap-around. Without a guard assertion, passing a non-power-of-2 DEPTH silently corrupts FIFO behavior at the pointer wrap point.",
+      "check_type": "regex",
+      "pattern": "\\$clog2\\s*\\(\\s*DEPTH\\s*\\)(?:(?!initial\\s+assert|\\$fatal|\\$error|\\(DEPTH\\s*&\\s*\\(DEPTH\\s*-\\s*1\\))(?!endmodule)[\\s\\S])*endmodule",
+      "severity": "warning",
+      "message": "Detect FIFO modules that declare pointer signals using $clog2(DEPTH)-wide logic (implying power-of-2 wrap behavior) but do not contain a compile-time or simulation-time assertion enforcing that DEPTH is a power of 2. If DEPTH is not a power of 2, the pointer natural wrap-around will be incorrect, producing memory aliasing and wrong full/empty counts.",
+      "stats": {
+        "hits": 61,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 129,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FIFO_THRESHOLD_PARAM_NO_BOUNDS_CHECK",
+      "description": "Detect FIFO modules that declare ALMOST_FULL_THRESH or ALMOST_EMPTY_THRESH parameters without any assertion checking that the threshold is within [1, DEPTH-1] range. Out-of-range thresholds (negative or exceeding DEPTH) will cause almost_full/almost_empty to be permanently asserted or deasserted.",
+      "rationale": "Threshold parameters that are not validated can silently produce permanently-asserted or permanently-deasserted almost-full/almost-empty flags, which defeats their purpose and can cause data loss in flow-controlled systems.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+int\\s+ALMOST_(?:FULL|EMPTY)_THRESH(?:(?!initial\\s+assert|\\$fatal|\\$error)(?!endmodule)[\\s\\S])*endmodule",
+      "severity": "warning",
+      "message": "Detect FIFO modules that declare ALMOST_FULL_THRESH or ALMOST_EMPTY_THRESH parameters without any assertion checking that the threshold is within [1, DEPTH-1] range. Out-of-range thresholds (negative or exceeding DEPTH) will cause almost_full/almost_empty to be permanently asserted or deasserted.",
+      "stats": {
+        "hits": 29,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 129,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "name": "LEARNED_FIFO_ALMOST_EMPTY_INCLUDES_EMPTY",
+      "description": "Detect FIFO modules where almost_empty is assigned as 'count <= THRESH' without excluding the empty condition (count == 0). When almost_empty subsumes empty, downstream logic that checks almost_empty for early warning may fail to distinguish between 'approaching empty' and 'actually empty'.",
+      "rationale": "Almost-empty flags are typically intended to signal that the FIFO is running low but still has valid data. Including count==0 in the almost_empty condition can cause consumer logic to attempt reads on an empty FIFO if it relies on almost_empty rather than empty for flow control.",
+      "check_type": "regex",
+      "pattern": "assign\\s+almost_empty\\s*=\\s*\\(\\s*count\\s*<=\\s*",
+      "severity": "info",
+      "message": "Detect FIFO modules where almost_empty is assigned as 'count <= THRESH' without excluding the empty condition (count == 0). When almost_empty subsumes empty, downstream logic that checks almost_empty for early warning may fail to distinguish between 'approaching empty' and 'actually empty'.",
+      "stats": {
+        "hits": 4,
+        "waived": 3,
+        "overlap": 0,
+        "runs": 129,
+        "accuracy": 0.25
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 25% after 4 hits (3 waived, 0 overlap)"
+    },
+    {
+      "name": "LEARNED_FIFO_SIMULTANEOUS_RW_CASE_DEFAULT_COMMENT_ONLY",
+      "description": "Detect FIFO occupancy counter case statements on {wr_valid, rd_valid} where the 2'b11 (simultaneous read+write) case is handled by the default branch with only a comment explanation, rather than an explicit 2'b11 arm. The comment may be wrong and the intent is not machine-verifiable.",
+      "rationale": "The simultaneous read+write case (net-zero change) is a correctness-critical case. Relying on default with a comment is fragile \u2014 if the case encoding changes or logic is refactored, the comment may not be updated. An explicit 2'b11 arm makes the intent clear and verifiable.",
+      "check_type": "regex",
+      "pattern": "case\\s*\\(\\s*\\{\\s*wr_valid\\s*,\\s*rd_valid\\s*\\}\\s*\\)(?:(?!endcase)[\\s\\S])*?default\\s*:\\s*\\w+\\s*<=\\s*\\w+\\s*;\\s*//[^\\n]*(?:net zero|no change|simultaneous)",
+      "severity": "info",
+      "message": "Detect FIFO occupancy counter case statements on {wr_valid, rd_valid} where the 2'b11 (simultaneous read+write) case is handled by the default branch with only a comment explanation, rather than an explicit 2'b11 arm. The comment may be wrong and the intent is not machine-verifiable.",
+      "stats": {
+        "hits": 4,
+        "waived": 3,
+        "overlap": 0,
+        "runs": 128,
+        "accuracy": 0.25
+      },
+      "status": "disabled",
+      "disable_reason": "accuracy 25% after 4 hits (3 waived, 0 overlap)"
+    },
+    {
+      "name": "LEARNED_FIFO_ALMOST_FULL_DEFAULT_EQUALS_DEPTH_MINUS_2",
+      "description": "Detect FIFO modules where ALMOST_FULL_THRESH defaults to DEPTH-2 as a parameter default expression without a bounds assertion. When DEPTH=2, ALMOST_FULL_THRESH=0, causing almost_full to be permanently asserted (count is always >= 0). When DEPTH=1, ALMOST_FULL_THRESH=-1, which as a signed int wraps or causes width issues.",
+      "rationale": "For small DEPTH values, parameter defaults derived from DEPTH arithmetic can produce degenerate threshold values that permanently assert flags, breaking FIFO flow control.",
+      "check_type": "regex",
+      "pattern": "parameter\\s+int\\s+ALMOST_FULL_THRESH\\s*=\\s*DEPTH\\s*-\\s*2",
+      "severity": "warning",
+      "message": "Detect FIFO modules where ALMOST_FULL_THRESH defaults to DEPTH-2 as a parameter default expression without a bounds assertion. When DEPTH=2, ALMOST_FULL_THRESH=0, causing almost_full to be permanently asserted (count is always >= 0). When DEPTH=1, ALMOST_FULL_THRESH=-1, which as a signed int wraps or causes width issues.",
+      "stats": {
+        "hits": 28,
+        "waived": 0,
+        "overlap": 0,
+        "runs": 128,
+        "accuracy": 1.0
+      }
     }
   ],
   "review_history": [
@@ -103,6 +1981,258 @@
       "missing_found": 0,
       "fsm_consequences": 0,
       "rules_learned": 0
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 3,
+      "missing_found": 2,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 2,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 1,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 1,
+      "missing_found": 1,
+      "fsm_consequences": 1,
+      "rules_learned": 1
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 1,
+      "fsm_consequences": 1,
+      "rules_learned": 1
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 1,
+      "missing_found": 1,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 6,
+      "missing_found": 1,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 3,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 2,
+      "fsm_consequences": 1,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 3,
+      "missing_found": 7,
+      "fsm_consequences": 3,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 4,
+      "missing_found": 6,
+      "fsm_consequences": 4,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 10,
+      "missing_found": 7,
+      "fsm_consequences": 3,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 1,
+      "missing_found": 6,
+      "fsm_consequences": 3,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 12,
+      "missing_found": 10,
+      "fsm_consequences": 3,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 3,
+      "missing_found": 5,
+      "fsm_consequences": 3,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 8,
+      "fsm_consequences": 4,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 7,
+      "missing_found": 5,
+      "fsm_consequences": 2,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 4,
+      "fsm_consequences": 2,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 14,
+      "missing_found": 6,
+      "fsm_consequences": 1,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 4,
+      "fsm_consequences": 0,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 6,
+      "missing_found": 5,
+      "fsm_consequences": 1,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 2,
+      "missing_found": 4,
+      "fsm_consequences": 0,
+      "rules_learned": 2
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 0,
+      "missing_found": 5,
+      "fsm_consequences": 1,
+      "rules_learned": 3
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 70,
+      "missing_found": 0,
+      "fsm_consequences": 0,
+      "rules_learned": 0
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 70,
+      "missing_found": 0,
+      "fsm_consequences": 0,
+      "rules_learned": 0
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 12,
+      "missing_found": 6,
+      "fsm_consequences": 0,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 14,
+      "missing_found": 7,
+      "fsm_consequences": 0,
+      "rules_learned": 4
+    },
+    {
+      "files": [
+        "design.sv"
+      ],
+      "fp_removed": 16,
+      "missing_found": 6,
+      "fsm_consequences": 2,
+      "rules_learned": 4
     }
   ]
 }

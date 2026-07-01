@@ -1,0 +1,93 @@
+#=====================================================================
+# UPF power intent for power_soc
+#   PD_AON : always-on   @ VDD      (1.0V)
+#   PD_CPU : switchable  @ VDD_CPU  (1.0V, gated)
+#   PD_MEM : switchable  @ VDD_MEM  (0.8V, gated + level-shifted)
+#
+# Seeded intent gaps (ground truth for the checker):
+#   #1  cpu_active  : PD_CPU output not covered by any isolation strategy
+#   #2  scratch_rdata : PD_MEM->PD_AON crossing has no level shifter
+#   #3  cpu_acc    : retention strategy excludes the accumulator that the
+#                    AON FSM actually save/restores
+#=====================================================================
+
+upf_version 2.1
+set_design_top power_soc
+
+#---------------------------------------------------------------------
+# Supply nets
+#---------------------------------------------------------------------
+create_supply_port VDD
+create_supply_port VSS
+create_supply_net  VDD
+create_supply_net  VSS
+create_supply_net  VDD_CPU
+create_supply_net  VDD_MEM
+
+# Nominal operating voltages (used for level-shifter checks)
+add_port_state VDD     -state {ON 1.0}
+add_port_state VDD_CPU -state {ON 1.0} -state {OFF off}
+add_port_state VDD_MEM -state {ON 0.8} -state {OFF off}
+
+#---------------------------------------------------------------------
+# Power domains
+#---------------------------------------------------------------------
+create_power_domain PD_AON
+create_power_domain PD_CPU -elements {cpu_acc cpu_result cpu_done}
+create_power_domain PD_MEM -elements {mem mem_rdata}
+
+set_domain_supply_net PD_AON -primary_power_net VDD     -primary_ground_net VSS
+set_domain_supply_net PD_CPU -primary_power_net VDD_CPU -primary_ground_net VSS
+set_domain_supply_net PD_MEM -primary_power_net VDD_MEM -primary_ground_net VSS
+
+#---------------------------------------------------------------------
+# Power switches
+#---------------------------------------------------------------------
+create_power_switch cpu_sw \
+    -domain PD_CPU \
+    -output_supply_port {vout VDD_CPU} \
+    -input_supply_port  {vin  VDD} \
+    -control_port {sleep_ctrl cpu_pwr_en} \
+    -on_state  {on  vin {cpu_pwr_en}} \
+    -off_state {off {!cpu_pwr_en}}
+
+create_power_switch mem_sw \
+    -domain PD_MEM \
+    -output_supply_port {vout VDD_MEM} \
+    -input_supply_port  {vin  VDD} \
+    -control_port {sleep_ctrl mem_pwr_en} \
+    -on_state  {on  vin {mem_pwr_en}} \
+    -off_state {off {!mem_pwr_en}}
+
+#---------------------------------------------------------------------
+# Isolation — clamp CPU outputs to 0 while the domain is off
+#   NOTE: applies_to outputs => every PD_CPU output must be clamped.
+#   cpu_active is left unclamped in RTL (seed #1).
+#---------------------------------------------------------------------
+set_isolation cpu_iso \
+    -domain PD_CPU \
+    -isolation_power_net  VDD \
+    -isolation_ground_net VSS \
+    -clamp_value 0 \
+    -applies_to outputs \
+    -isolation_signal cpu_iso_en \
+    -isolation_sense high
+
+#---------------------------------------------------------------------
+# Retention — save/restore CPU state across power-down
+#   Only cpu_result is retained; cpu_acc is omitted (seed #3).
+#---------------------------------------------------------------------
+set_retention cpu_ret \
+    -domain PD_CPU \
+    -elements {cpu_result} \
+    -retention_power_net VDD \
+    -save_signal    {cpu_ret_save    posedge} \
+    -restore_signal {cpu_ret_restore posedge}
+
+#---------------------------------------------------------------------
+# Level shifting
+#   PD_MEM (0.8V) drives PD_AON (1.0V). A low->high shifter is required
+#   on mem outputs, but none is declared for scratch_rdata (seed #2).
+#   (mem_iso_en isolation for PD_MEM is also not defined.)
+#---------------------------------------------------------------------
+# set_level_shifter mem_ls -domain PD_MEM -applies_to outputs -rule low_to_high

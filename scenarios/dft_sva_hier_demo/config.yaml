@@ -1,0 +1,6 @@
+name: dft_sva_hier_demo
+description: DFT, SVA formal intent, and hierarchical analysis demo
+top: top_system
+files:
+  - sub_counter.sv
+  - top_system.sv

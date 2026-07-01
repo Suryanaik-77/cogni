@@ -1,0 +1,5 @@
+name: cdc_demo
+description: Clock Domain Crossing demo — two clock domains with intentional CDC bugs
+top: cdc_example
+files:
+  - cdc_example.sv

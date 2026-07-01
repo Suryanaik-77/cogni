@@ -1,10 +1,9 @@
 """
-Cogni Lint Dashboard — three-panel UI for RTL editing and cross-tool validation.
+Cogni Lint Dashboard — UI for RTL editing and pure-Python analysis.
 
 Left panel:   RTL code editor with scenario selector
-Middle panel:  VCS lint results (warnings, rule pass/fail)
-Right panel:   Verilator lint results (warnings, rule pass/fail)
-Run button:    Executes both tools on the current code and shows results.
+Right panel:  Cogni Analyzer results — lint findings + synthesis predictions
+Run button:   Runs the Cogni RTL analyzer on the current code and shows results.
 
 Usage:
     python lint_ui.py [--port 5001] [--ngrok] [--ngrok-token TOKEN]
@@ -48,121 +47,6 @@ def _read_rtl_file(scenario, filename):
         return ""
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
-
-
-def _run_verilator(rtl_files, top=None):
-    """Run verilator --lint-only and return structured results."""
-    import subprocess, re
-    cmd = ["verilator", "--lint-only", "-Wall", "-Wno-fatal"]
-    if top:
-        cmd.extend(["--top-module", top])
-    cmd.extend(rtl_files)
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        output = result.stdout + result.stderr
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return {"error": "verilator not found or timed out", "warnings": [], "raw": ""}
-
-    warnings = []
-    pattern = re.compile(
-        r"%(?:Warning|Error)-(\w+):\s*(.*?):(\d+):\d+:\s*(.*?)(?:\n|$)")
-    for m in pattern.finditer(output):
-        warnings.append({
-            "category": m.group(1),
-            "file": os.path.basename(m.group(2)),
-            "line": int(m.group(3)),
-            "message": m.group(4).strip(),
-        })
-
-    categories = {}
-    for w in warnings:
-        cat = w["category"]
-        categories[cat] = categories.get(cat, 0) + 1
-
-    return {
-        "warnings": warnings,
-        "categories": categories,
-        "total": len(warnings),
-        "raw": output[-3000:] if len(output) > 3000 else output,
-    }
-
-
-def _run_vcs(rtl_files, top=None):
-    """Run VCS lint and return structured results."""
-    import subprocess, re
-    work_dir = tempfile.mkdtemp(prefix="cogni_lint_ui_vcs_")
-    abs_files = [os.path.abspath(f) for f in rtl_files]
-
-    warnings = []
-    raw_parts = []
-    lint_pattern = re.compile(r"Lint-\[(\w+)\]\s*(.*?)(?:\n(?:\S)|\Z)", re.DOTALL)
-    detail_pattern = re.compile(
-        r"Lint-\[(\w+)\][^\n]*\n([^\n]*?),\s*(\d+)\n(.*?)(?=\n\n|\nLint-|\nParsing|\nTop Level|\nStarting|\nCPU|\Z)",
-        re.DOTALL)
-
-    # Phase 1: vlogan
-    vlogan_cmd = ["vlogan", "-sverilog", "-full64", "+warn=all"] + abs_files
-    try:
-        result = subprocess.run(
-            vlogan_cmd, capture_output=True, text=True,
-            timeout=60, cwd=work_dir)
-        output = result.stdout + result.stderr
-        raw_parts.append(output)
-        for m in detail_pattern.finditer(output):
-            warnings.append({
-                "category": m.group(1),
-                "file": os.path.basename(m.group(2).strip()),
-                "line": int(m.group(3)),
-                "message": m.group(4).strip().replace("\n", " "),
-            })
-        # Fallback: simple pattern
-        if not warnings:
-            for m in lint_pattern.finditer(output):
-                warnings.append({
-                    "category": m.group(1),
-                    "file": "",
-                    "line": 0,
-                    "message": m.group(2).strip().replace("\n", " "),
-                })
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return {"error": "vlogan not found or timed out", "warnings": [], "raw": ""}
-
-    # Phase 2: vcs elaboration
-    vcs_cmd = ["vcs", "-sverilog", "-full64", "+lint=all",
-               "+warn=all", "-notice"] + abs_files
-    if top:
-        vcs_cmd.extend(["-top", top])
-    try:
-        result = subprocess.run(
-            vcs_cmd, capture_output=True, text=True,
-            timeout=60, cwd=work_dir)
-        output = result.stdout + result.stderr
-        raw_parts.append(output)
-        for m in detail_pattern.finditer(output):
-            warnings.append({
-                "category": m.group(1),
-                "file": os.path.basename(m.group(2).strip()),
-                "line": int(m.group(3)),
-                "message": m.group(4).strip().replace("\n", " "),
-            })
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Clean up
-    shutil.rmtree(work_dir, ignore_errors=True)
-
-    categories = {}
-    for w in warnings:
-        cat = w["category"]
-        categories[cat] = categories.get(cat, 0) + 1
-
-    raw = "\n---\n".join(raw_parts)
-    return {
-        "warnings": warnings,
-        "categories": categories,
-        "total": len(warnings),
-        "raw": raw[-3000:] if len(raw) > 3000 else raw,
-    }
 
 
 def _check_rules_against(measurements):
@@ -240,32 +124,6 @@ def _check_rules_against(measurements):
     return results
 
 
-def _get_verilator_measurements(rtl_files, top=None):
-    """Run Verilator lint and return measurements dict."""
-    from agent.fix_verify import lint_counts
-    from adapters.rtl.verilator.oracle import _CLASS_TO_KEY, _VERILATOR_COVERED_KEYS
-    classes = lint_counts(rtl_files, top=top,
-                          extra_args=["-Wall", "-Wno-fatal"])
-    measurements = {k: 0 for k in _VERILATOR_COVERED_KEYS}
-    for cls, n in classes.items():
-        key = _CLASS_TO_KEY.get(cls)
-        if key:
-            measurements[key] = measurements.get(key, 0) + n
-    return measurements
-
-
-def _get_vcs_measurements(rtl_files, top=None):
-    """Run VCS lint and return measurements dict."""
-    from adapters.rtl.vcs.oracle import _run_vcs_lint, _VCS_CLASS_TO_RTL_KEY, _VCS_COVERED_KEYS
-    classes = _run_vcs_lint(rtl_files, top=top)
-    measurements = {k: 0 for k in _VCS_COVERED_KEYS}
-    for cls, n in classes.items():
-        key = _VCS_CLASS_TO_RTL_KEY.get(cls)
-        if key:
-            measurements[key] = measurements.get(key, 0) + n
-    return measurements
-
-
 # ---------------------------------------------------------------------------
 # API Routes
 # ---------------------------------------------------------------------------
@@ -308,23 +166,46 @@ def api_run():
                  for f in sorted(os.listdir(tmp_dir))
                  if f.endswith((".sv", ".v", ".svh"))]
 
-    verilator_result = _run_verilator(all_files)
-    vcs_result = _run_vcs(all_files)
+    # Handle SDC constraint files
+    sdc_code = data.get("sdc_code", "")
+    sdc_files = []
+    if sdc_code:
+        sdc_path = os.path.join(tmp_dir, "constraints.sdc")
+        with open(sdc_path, "w", encoding="utf-8") as f:
+            f.write(sdc_code)
+        sdc_files.append(sdc_path)
+    if scenario:
+        sdc_dir = os.path.join(_SCENARIOS_DIR, scenario, "constraints")
+        if os.path.isdir(sdc_dir):
+            for fn in os.listdir(sdc_dir):
+                if fn.endswith(".sdc"):
+                    sdc_files.append(os.path.join(sdc_dir, fn))
 
-    verilator_meas = _get_verilator_measurements(all_files)
-    vcs_meas = _get_vcs_measurements(all_files)
-
-    verilator_rules = _check_rules_against(verilator_meas)
-    vcs_rules = _check_rules_against(vcs_meas)
+    # Handle UPF power-intent files
+    upf_code = data.get("upf_code", "")
+    upf_files = []
+    if upf_code:
+        upf_path = os.path.join(tmp_dir, "power.upf")
+        with open(upf_path, "w", encoding="utf-8") as f:
+            f.write(upf_code)
+        upf_files.append(upf_path)
+    if scenario:
+        upf_dir = os.path.join(_SCENARIOS_DIR, scenario, "upf")
+        if os.path.isdir(upf_dir):
+            for fn in os.listdir(upf_dir):
+                if fn.endswith(".upf"):
+                    upf_files.append(os.path.join(upf_dir, fn))
 
     # Cogni RTL Analyzer (pure Python, no commercial tool)
     from agent.rtl_analyzer import analyze_design
-    cogni_result = analyze_design(all_files)
+    cogni_result = analyze_design(all_files, sdc_files=sdc_files or None,
+                                  upf_files=upf_files or None)
     cogni_data = {
         "findings": [
             {"rule": f.rule, "severity": f.severity, "file": f.file,
              "line": f.line, "message": f.message,
-             "synth_impact": f.synth_impact}
+             "synth_impact": f.synth_impact,
+             "confidence": f.confidence}
             for f in cogni_result.findings
         ],
         "predictions": [
@@ -340,11 +221,7 @@ def api_run():
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return jsonify({
-        "verilator": verilator_result,
-        "vcs": vcs_result,
         "cogni": cogni_data,
-        "verilator_rules": verilator_rules,
-        "vcs_rules": vcs_rules,
         "cogni_rules": cogni_rules,
     })
 
@@ -376,9 +253,18 @@ def api_agent_review():
             f.write(code)
         tmp_paths.append(p)
 
-    from agent.rtl_analyzer import agent_review_loop
+    from agent.rtl_analyzer import agent_review_loop, analyze_design
 
     try:
+        static_result = analyze_design(tmp_paths)
+        static_findings = [
+            {"rule": f.rule, "severity": f.severity,
+             "file": f.file, "line": f.line,
+             "message": f.message, "synth_impact": f.synth_impact or "",
+             "confidence": f.confidence}
+            for f in static_result.findings
+        ]
+
         loop_result = agent_review_loop(
             tmp_paths, rtl_sources=all_files, max_iterations=3)
         reviewed = loop_result["result"]
@@ -388,7 +274,8 @@ def api_agent_review():
         agent_findings = [
             {"rule": f.rule, "severity": f.severity,
              "file": f.file, "line": f.line,
-             "message": f.message, "synth_impact": f.synth_impact or ""}
+             "message": f.message, "synth_impact": f.synth_impact or "",
+             "confidence": f.confidence}
             for f in reviewed.findings
         ]
 
@@ -396,12 +283,18 @@ def api_agent_review():
         total_missing = sum(it["missing_found"] for it in iters)
         total_fsm = sum(it["fsm_consequences"] for it in iters)
 
+        waived_rules = {(f["rule"], f["line"]) for f in static_findings} - \
+                       {(f["rule"], f["line"]) for f in agent_findings}
+
         resp = {
             "false_positives": total_fp,
             "missing_bugs": total_missing,
             "fsm_consequences": total_fsm,
             "suggested_rules": suggested,
+            "static_findings": static_findings,
             "agent_findings": agent_findings,
+            "waived_findings": [f for f in static_findings
+                                if (f["rule"], f["line"]) in waived_rules],
             "waivers_total": iters[-1]["total_waivers"] if iters else 0,
             "learned_rules_total": iters[-1]["total_rules"] if iters else 0,
             "iterations": iters,
@@ -409,7 +302,7 @@ def api_agent_review():
             "total_iterations": loop_result["total_iterations"],
         }
     except Exception as e:
-        resp = {"error": str(e), "agent_findings": []}
+        resp = {"error": str(e), "agent_findings": [], "static_findings": []}
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
     return jsonify(resp)
@@ -727,6 +620,13 @@ body {
 .sev-error { background: #da3633; color: #fff; }
 .sev-warning { background: #d29922; color: #fff; }
 .sev-info { background: #388bfd; color: #fff; }
+.conf-badge {
+  display: inline-block; padding: 1px 4px; border-radius: 3px;
+  font-size: 9px; font-weight: 600; margin-right: 4px;
+}
+.conf-high { background: #238636; color: #fff; }
+.conf-med { background: #6e7681; color: #fff; }
+.conf-low { background: #484f58; color: #c9d1d9; }
 
 /* Empty state */
 .empty-state {
@@ -798,35 +698,6 @@ body {
     </div>
   </div>
 
-  <!-- PANEL 3: VCS Results -->
-  <div class="panel">
-    <div class="panel-header">
-      <span class="tool-icon" style="background:#d29922"></span>
-      VCS
-      <span class="badge" id="vcsBadge">--</span>
-    </div>
-    <div class="panel-body" id="vcsResults">
-      <div class="empty-state">
-        <div class="icon">&#9881;</div>
-        Run to see VCS lint results
-      </div>
-    </div>
-  </div>
-
-  <!-- PANEL 4: Verilator Results -->
-  <div class="panel">
-    <div class="panel-header">
-      <span class="tool-icon" style="background:#238636"></span>
-      Verilator
-      <span class="badge" id="verilatorBadge">--</span>
-    </div>
-    <div class="panel-body" id="verilatorResults">
-      <div class="empty-state">
-        <div class="icon">&#9881;</div>
-        Run to see Verilator lint results
-      </div>
-    </div>
-  </div>
 </div>
 
 <script>
@@ -978,11 +849,11 @@ async function onScenarioChange() {
 }
 
 function clearResults() {
-  ['cogniResults', 'vcsResults', 'verilatorResults'].forEach(id => {
+  ['cogniResults'].forEach(id => {
     document.getElementById(id).innerHTML =
       '<div class="empty-state"><div class="icon">&#9881;</div>Click Run to analyze</div>';
   });
-  ['cogniBadge', 'vcsBadge', 'verilatorBadge'].forEach(id => {
+  ['cogniBadge'].forEach(id => {
     document.getElementById(id).textContent = '--';
     document.getElementById(id).className = 'badge';
   });
@@ -1042,7 +913,7 @@ async function onRun() {
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
   btn.textContent = 'Running...';
-  document.getElementById('statusText').textContent = 'Running Cogni + Verilator + VCS...';
+  document.getElementById('statusText').textContent = 'Running Cogni Analyzer...';
 
   // Save current editor state
   if (state.activeFile) {
@@ -1064,10 +935,6 @@ async function onRun() {
   // Show loading
   document.getElementById('cogniResults').innerHTML =
     '<div class="loading"><span class="spinner"></span>Running Cogni Analyzer...</div>';
-  document.getElementById('vcsResults').innerHTML =
-    '<div class="loading"><span class="spinner"></span>Running VCS lint...</div>';
-  document.getElementById('verilatorResults').innerHTML =
-    '<div class="loading"><span class="spinner"></span>Running Verilator lint...</div>';
 
   const code = state.fileContents[state.activeFile] || document.getElementById('codeEditor').value;
   const scenario = state.customMode ? '' : state.scenario;
@@ -1083,15 +950,9 @@ async function onRun() {
     });
     const data = await res.json();
     renderCogniResults(data.cogni, data.cogni_rules);
-    renderVCSResults(data.vcs, data.vcs_rules);
-    renderVerilatorResults(data.verilator, data.verilator_rules);
     const cogniTotal = (data.cogni || {}).total || 0;
-    const vcsViol = (data.vcs_rules || []).filter(r => r.status === 'violation').length;
-    const verViol = (data.verilator_rules || []).filter(r => r.status === 'violation').length;
     document.getElementById('statusText').textContent =
-      `Cogni=${cogniTotal} findings, ` +
-      `VCS=${data.vcs.total} warnings (${vcsViol} rule violations), ` +
-      `Verilator=${data.verilator.total} warnings (${verViol} rule violations)`;
+      `Cogni=${cogniTotal} findings`;
   } catch (e) {
     document.getElementById('statusText').textContent = 'Error: ' + e.message;
   }
@@ -1125,119 +986,6 @@ async function onSave() {
 }
 
 // ---- Render Results ----
-function renderToolResults(containerId, badgeId, result, toolName, rules) {
-  const container = document.getElementById(containerId);
-  const badge = document.getElementById(badgeId);
-
-  if (result.error) {
-    container.innerHTML = `<div class="empty-state">${result.error}</div>`;
-    badge.textContent = 'error';
-    badge.className = 'badge badge-error';
-    return;
-  }
-
-  const ruleViolations = (rules || []).filter(r => r.status === 'violation');
-  const totalIssues = result.total + ruleViolations.length;
-  badge.textContent = result.total + ' warnings';
-  badge.className = totalIssues > 0 ? 'badge badge-error' : 'badge badge-clean';
-
-  let html = '';
-
-  // Summary
-  if (Object.keys(result.categories).length > 0 || rules) {
-    html += '<div class="result-section"><h3>Summary</h3><div class="summary-bar">';
-    for (const [cat, count] of Object.entries(result.categories || {})) {
-      html += `<span class="summary-stat">
-        <span class="dot dot-yellow"></span>${cat}: ${count}
-      </span>`;
-    }
-    if (rules) {
-      const v = rules.filter(r => r.status === 'violation').length;
-      const c = rules.filter(r => r.status === 'clean').length;
-      const na = rules.filter(r => r.status === 'n/a').length;
-      html += `<span class="summary-stat"><span class="dot dot-red"></span>Rules FAIL: ${v}</span>`;
-      html += `<span class="summary-stat"><span class="dot dot-green"></span>Rules PASS: ${c}</span>`;
-      if (na > 0) html += `<span class="summary-stat"><span class="dot dot-gray"></span>N/A: ${na}</span>`;
-    }
-    html += '</div></div>';
-  }
-
-  // Warnings
-  html += '<div class="result-section"><h3>Lint Warnings (' + result.total + ')</h3>';
-  if (result.warnings.length === 0) {
-    html += '<div style="padding:8px;color:#238636;font-size:12px">No warnings found</div>';
-  }
-  result.warnings.forEach(w => {
-    html += `<div class="warning-item">
-      <span class="cat">[${w.category}]</span>
-      ${w.file ? `<span class="loc">${w.file}:${w.line}</span>` : ''}
-      <div class="msg">${escHtml(w.message)}</div>
-    </div>`;
-  });
-  html += '</div>';
-
-  // Rule checks
-  if (rules && rules.length) {
-    const violations = rules.filter(r => r.status === 'violation');
-    const clean = rules.filter(r => r.status === 'clean');
-    const na = rules.filter(r => r.status === 'n/a');
-
-    if (violations.length) {
-      html += '<div class="result-section"><h3>Rule Violations (' + violations.length + ')</h3>';
-      violations.forEach(r => {
-        html += `<div class="rule-item violation">
-          <span class="rule-status">FAIL</span>
-          <div class="rule-info">
-            <div class="rule-id">${r.id}</div>
-            <div class="rule-stmt">${escHtml(r.statement)}</div>
-            <div class="rule-detail">${escHtml(r.details)}</div>
-          </div>
-        </div>`;
-      });
-      html += '</div>';
-    }
-
-    if (clean.length) {
-      html += '<div class="result-section"><h3>Rules Passed (' + clean.length + ')</h3>';
-      clean.forEach(r => {
-        html += `<div class="rule-item clean">
-          <span class="rule-status">PASS</span>
-          <div class="rule-info">
-            <div class="rule-id">${r.id}</div>
-            <div class="rule-stmt">${escHtml(r.statement)}</div>
-          </div>
-        </div>`;
-      });
-      html += '</div>';
-    }
-
-    if (na.length) {
-      html += '<div class="result-section"><h3>Not Measured (' + na.length + ')</h3>';
-      na.forEach(r => {
-        html += `<div class="rule-item skipped">
-          <span class="rule-status">N/A</span>
-          <div class="rule-info">
-            <div class="rule-id">${r.id}</div>
-            <div class="rule-stmt">${escHtml(r.statement)}</div>
-          </div>
-        </div>`;
-      });
-      html += '</div>';
-    }
-  }
-
-  // Raw output
-  if (result.raw) {
-    const rawId = toolName + '_raw';
-    html += `<div class="result-section">
-      <button class="raw-toggle" onclick="toggleRaw('${rawId}')">Show raw output</button>
-      <div class="raw-output" id="${rawId}">${escHtml(result.raw)}</div>
-    </div>`;
-  }
-
-  container.innerHTML = html;
-}
-
 function renderCogniResults(result, rules) {
   const container = document.getElementById('cogniResults');
   const badge = document.getElementById('cogniBadge');
@@ -1260,6 +1008,50 @@ function renderCogniResults(result, rules) {
   updateLineNumbers();
 
   if (findings.length > 0) {
+    // --- Signal-grouped view: cluster related findings per signal ---
+    const sigMap = {};
+    findings.forEach(f => {
+      const m = f.message.match(/'([a-zA-Z_]\w*)'/);
+      const sig = m ? m[1] : null;
+      if (sig) {
+        if (!sigMap[sig]) sigMap[sig] = [];
+        sigMap[sig].push(f);
+      }
+    });
+    const multiSigFindings = Object.entries(sigMap).filter(([,v]) => v.length >= 2);
+    if (multiSigFindings.length > 0) {
+      html += `<div class="result-section"><h3>SIGNAL CLUSTERS (${multiSigFindings.length} signals with multiple findings)</h3>`;
+      multiSigFindings.sort((a,b) => {
+        const sevOrder = {error:0, warning:1, info:2};
+        const aMax = Math.min(...a[1].map(f => sevOrder[f.severity] || 2));
+        const bMax = Math.min(...b[1].map(f => sevOrder[f.severity] || 2));
+        return aMax - bMax || b[1].length - a[1].length;
+      });
+      multiSigFindings.forEach(([sig, items]) => {
+        const errs = items.filter(f => f.severity === 'error').length;
+        const warns = items.filter(f => f.severity === 'warning').length;
+        const sigCls = errs > 0 ? 'color:#da3633' : warns > 0 ? 'color:#d29922' : 'color:#8b949e';
+        const badge = errs > 0 ? '<span class="sev-badge sev-error" style="font-size:9px">E</span>' :
+                      warns > 0 ? '<span class="sev-badge sev-warning" style="font-size:9px">W</span>' : '';
+        html += `<div style="margin:4px 0;padding:6px 8px;background:#161b22;border-radius:4px;border-left:3px solid ${errs?'#da3633':warns?'#d29922':'#30363d'}">
+          <div style="font-weight:600;font-size:12px;color:#c9d1d9">
+            ${badge} <span style="${sigCls}">${sig}</span>
+            <span style="color:#8b949e;font-weight:400;font-size:10px;margin-left:6px">${items.length} findings</span>
+          </div>
+          <div style="margin-top:3px;font-size:10px;color:#8b949e">`;
+        items.forEach(f => {
+          const sc = f.severity === 'error' ? '#da3633' : f.severity === 'warning' ? '#d29922' : '#8b949e';
+          html += `<div style="margin:1px 0;cursor:pointer" onclick="scrollToLine(${f.line})">
+            <span style="color:${sc}">${f.severity[0].toUpperCase()}</span>
+            <span style="color:#58a6ff">${f.rule}</span> L${f.line}
+          </div>`;
+        });
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
+
+    // --- Standard severity-grouped view ---
     const groups = {error:[], warning:[], info:[]};
     findings.forEach(f => (groups[f.severity] || groups.info).push(f));
     const sectionNames = {error:'ERRORS', warning:'WARNINGS', info:'INFO'};
@@ -1271,9 +1063,13 @@ function renderCogniResults(result, rules) {
       items.forEach(f => {
         const sevCls = 'sev-' + f.severity;
         const synthTip = f.synth_impact ? `<div class="rule-detail">Synth: ${escHtml(f.synth_impact)}</div>` : '';
+        const conf = f.confidence || 0;
+        const confCls = conf >= 90 ? 'conf-high' : conf >= 60 ? 'conf-med' : 'conf-low';
+        const confTag = conf > 0 ? `<span class="conf-badge ${confCls}">${conf}%</span>` : '';
         html += `<div class="warning-item finding-item" data-line="${f.line}" style="cursor:pointer"
           onclick="scrollToLine(${f.line})">
           <span class="sev-badge ${sevCls}">${f.severity}</span>
+          ${confTag}
           <span class="cat">[${f.rule}]</span>
           <span class="loc">${f.file}:<strong>${f.line}</strong></span>
           <div class="msg">${escHtml(f.message)}</div>
@@ -1288,7 +1084,7 @@ function renderCogniResults(result, rules) {
     html += '</div>';
   }
 
-  // ---- SYNTHESIS SCORECARD ----
+  // ---- SYNTHESIS READINESS ----
   const synth = (result.measurements || {})['cogni.synth'];
   if (synth) {
     const t = synth.timing || {};
@@ -1296,104 +1092,443 @@ function renderCogniResults(result, rules) {
     const fpga = synth.fpga_resources || {};
     const fsm = synth.fsm || {};
     const mem = synth.memory || {};
-    const gb = synth.gate_breakdown || {};
+    const ops = synth.operators || {};
+    const opt = synth.optimization || {};
 
-    const gateVal = (synth.total_gates || 0).toLocaleString();
-    const freqVal = (t.max_freq_mhz || 0).toFixed(0);
-    const pathVal = (t.critical_path_ns || 0).toFixed(2);
-    const gatingPct = (pwr.clock_gating_pct || 0).toFixed(0);
-    const gatingCls = gatingPct >= 80 ? 'val-good' : (gatingPct >= 40 ? 'val-warn' : 'val-bad');
+    const findings = result.findings || [];
+    const synthBlockerRules = [
+      'FUNC_comb_loop', 'W_multi_driver',
+      'SIM_force_release', 'SYNTH_5006_while',
+      'SYNTH_5008_for_bound', 'SYNTH_5007_event_in_comb',
+      'SYNTH_recursive_func'
+    ];
+    const synthWarnRules = [
+      'SYNTH_5001_delay', 'SYNTH_5000_initial',
+      'SYNTH_5003_integer', 'SYNTH_5004_sys_task',
+      'CLK_gated_clock', 'CLK_data_as_clock'
+    ];
+    // Multi-write-port RAM is a *portable* fail but vendor tools can infer it
+    // from a dual-port template — treat it as vendor-dependent, not a hard blocker.
+    const isRamMultiWrite = f => f.rule === 'W_multi_driver' &&
+      /write port|RAM array/i.test(f.message || '');
+    const ramMultiWrite = findings.filter(isRamMultiWrite);
+    const hardBlockers = findings.filter(f =>
+      synthBlockerRules.includes(f.rule) && !isRamMultiWrite(f));
+    const hasBlockers = hardBlockers.length > 0;
+    const hasSynthWarns = findings.some(f => synthWarnRules.includes(f.rule));
+    const hasLatches = synth.latch_bits > 0 ||
+      findings.some(f => f.rule === 'W402_latch_inferred');
+    const hasDeadLogic = findings.some(f =>
+      f.rule === 'FUNC_cmp_out_of_range' || f.rule === 'FUNC_counter_overflow');
+    const hasRamMultiWrite = ramMultiWrite.length > 0;
+    const readyStatus = hasBlockers ? 'FAIL' :
+                        (hasRamMultiWrite || hasLatches || hasDeadLogic || hasSynthWarns) ? 'WARN' : 'PASS';
+    const readyCls = readyStatus === 'PASS' ? 'val-good' : readyStatus === 'WARN' ? 'val-warn' : 'val-bad';
+    let readyIcon = 'Synthesizable';
+    if (readyStatus === 'FAIL') {
+      const reasons = [...new Set(hardBlockers.map(f => f.rule.replace(/^(SIM_|SYNTH_\d+_)/, '')))];
+      readyIcon = 'Synthesis will FAIL (' + reasons.slice(0,3).join(', ') + ')';
+    } else if (readyStatus === 'WARN') {
+      const risks = [];
+      if (hasRamMultiWrite) risks.push('multi-write RAM (needs vendor dual-port template)');
+      if (hasLatches) risks.push('inferred latches');
+      if (hasDeadLogic) risks.push('dead logic');
+      if (hasSynthWarns) {
+        const warnFindings = findings.filter(f => synthWarnRules.includes(f.rule));
+        const warnReasons = [...new Set(warnFindings.map(f => f.rule.replace(/^(SYNTH_\d+_|CLK_)/, '')))];
+        risks.push(...warnReasons.slice(0,2));
+      }
+      // Multi-write RAM is portable-fail but vendor-inferrable — say so plainly.
+      if (hasRamMultiWrite) {
+        readyIcon = 'Portable synth: FAIL · Vendor: template-dependent (' + risks.join(', ') + ')';
+      } else {
+        readyIcon = 'Synthesizable (risks: ' + risks.join(', ') + ')';
+      }
+    }
 
     html += `<div class="result-section">
-      <h3>SYNTHESIS SCORECARD</h3>
+      <h3>SYNTHESIS READINESS</h3>
       <div class="synth-scorecard">
         <div class="scorecard-grid">
           <div class="scorecard-item">
-            <span class="scorecard-label">Gate Equivalents</span>
-            <span class="scorecard-value">${gateVal}</span>
+            <span class="scorecard-label">Status</span>
+            <span class="scorecard-value ${readyCls}">${readyIcon}</span>
           </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Flip-Flop Bits</span>
-            <span class="scorecard-value">${synth.ff_bits || 0}</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Critical Path</span>
-            <span class="scorecard-value">${pathVal} ns</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Max Frequency</span>
-            <span class="scorecard-value">~${freqVal} MHz</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Clock Gating</span>
-            <span class="scorecard-value ${gatingCls}">${gatingPct}%</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Comb Depth</span>
-            <span class="scorecard-value">${t.max_comb_depth || 0} levels</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Sequential</span>
-            <span class="scorecard-value">${(gb.sequential || 0).toLocaleString()} gates</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Combinational</span>
-            <span class="scorecard-value">${(gb.combinational || 0).toLocaleString()} gates</span>
-          </div>`;
-
-    if ((mem.total_bits || 0) > 0) {
-      html += `
-          <div class="scorecard-item">
-            <span class="scorecard-label">Memory</span>
-            <span class="scorecard-value">${(mem.total_bits || 0).toLocaleString()} bits</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">Memory Gates</span>
-            <span class="scorecard-value">${(gb.memory || 0).toLocaleString()}</span>
-          </div>`;
-    }
-
-    if (fsm.states > 0) {
-      html += `
-          <div class="scorecard-item">
-            <span class="scorecard-label">FSM States</span>
-            <span class="scorecard-value">${fsm.states} (${fsm.encoding_bits}-bit)</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">FSM Min Bits</span>
-            <span class="scorecard-value">${fsm.min_bits}</span>
-          </div>`;
-    }
-
-    html += `
-          <div class="scorecard-item">
-            <span class="scorecard-label">FPGA LUTs</span>
-            <span class="scorecard-value">~${(fpga.lut_count || 0).toLocaleString()}</span>
-          </div>
-          <div class="scorecard-item">
-            <span class="scorecard-label">FPGA FFs</span>
-            <span class="scorecard-value">${fpga.ff_count || 0}</span>
-          </div>`;
-
-    if ((fpga.dsp_blocks || 0) > 0) {
-      html += `
-          <div class="scorecard-item">
-            <span class="scorecard-label">FPGA DSPs</span>
-            <span class="scorecard-value">${fpga.dsp_blocks}</span>
-          </div>`;
-    }
-    if ((fpga.bram_blocks || 0) > 0) {
-      html += `
-          <div class="scorecard-item">
-            <span class="scorecard-label">FPGA BRAMs</span>
-            <span class="scorecard-value">${fpga.bram_blocks}</span>
-          </div>`;
-    }
-
-    html += `
         </div>
       </div>
-    </div>`;
+
+      <h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">HARDWARE INFERENCE</h4>
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">Resource</th><th>Inferred?</th><th>Detail</th>
+        </tr>`;
+
+    // Flip-Flops
+    const ffBits = synth.ff_bits || 0;
+    const ffSigs = Object.keys(synth.ff_signals || {});
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">Flip-Flops</td>
+      <td style="color:#c9d1d9">${ffBits > 0 ? 'Yes' : 'No'} (${ffBits} bits, ${ffSigs.length} registers)</td>
+      <td style="color:#8b949e">${ffSigs.slice(0,5).join(', ')}${ffSigs.length > 5 ? '...' : ''}</td>
+    </tr>`;
+
+    // Latches
+    const latchSigNames = synth.latch_signal_names || [];
+    const latchCount = latchSigNames.length || synth.latch_bits || 0;
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;${hasLatches ? 'color:#da3633' : 'color:#58a6ff'}">Latch</td>
+      <td style="${hasLatches ? 'color:#da3633;font-weight:600' : 'color:#238636'}">${hasLatches ? 'Yes (' + latchCount + ' signal' + (latchCount !== 1 ? 's' : '') + ') — UNINTENDED' : 'No'}</td>
+      <td style="color:#8b949e">${latchSigNames.length > 0 ? latchSigNames.slice(0,5).join(', ') : (hasLatches ? 'Missing default/else in always_comb' : 'Clean')}</td>
+    </tr>`;
+
+    // Clock Enable
+    const ceSigs = synth.ce_signals || [];
+    const nonCeSigs = synth.non_ce_signals || [];
+    const enBlocks = ceSigs.length;
+    const totalBlocks = enBlocks + nonCeSigs.length;
+    const ceDetail = enBlocks > 0
+      ? 'CE: ' + ceSigs.slice(0,4).join(', ') + (nonCeSigs.length > 0 ? ' | No CE: ' + nonCeSigs.slice(0,4).join(', ') : '')
+      : 'Conditional data selection (mux), not dedicated CE';
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">Clock Enable</td>
+      <td style="color:#c9d1d9">${enBlocks > 0 ? 'Yes (' + enBlocks + ' of ' + totalBlocks + ' blocks)' : 'No'}</td>
+      <td style="color:#8b949e">${ceDetail}</td>
+    </tr>`;
+
+    // DSP (Multiplier)
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">DSP</td>
+      <td style="color:#c9d1d9">${ops.multipliers > 0 ? 'Yes (' + ops.multipliers + ' multiplier' + (ops.multipliers > 1 ? 's)' : ')') : 'No'}</td>
+      <td style="color:#8b949e">${ops.multipliers > 0 ? 'FPGA: maps to DSP48' : 'No multipliers'}</td>
+    </tr>`;
+
+    // BRAM / Memory
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">BRAM</td>
+      <td style="color:#c9d1d9">${mem.arrays > 0 ? 'Yes (' + mem.arrays + ' array' + (mem.arrays > 1 ? 's' : '') + ', ' + (mem.total_bits || 0).toLocaleString() + ' bits)' : 'No'}</td>
+      <td style="color:#8b949e">${(fpga.bram_blocks || 0) > 0 ? fpga.bram_blocks + ' BRAM block(s)' : mem.arrays > 0 ? 'LUTRAM or FF-mapped' : 'No memory arrays'}</td>
+    </tr>`;
+
+    // Adder / Carry Chain
+    const adderExprs = (ops.adder_details || []).map(d => d.expr).slice(0,4).join(', ');
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">Adder / Carry Chain</td>
+      <td style="color:#c9d1d9">${ops.adders > 0 ? 'Yes (' + ops.adders + ')' : 'No'}</td>
+      <td style="color:#8b949e">${ops.adders > 0 ? adderExprs : 'No arithmetic'}</td>
+    </tr>`;
+
+    // Comparator
+    const cmpExprs = (ops.comparator_details || []).map(d => d.expr).slice(0,5).join(', ');
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">Comparator</td>
+      <td style="color:#c9d1d9">${ops.comparators > 0 ? 'Yes (' + ops.comparators + ')' : 'No'}</td>
+      <td style="color:#8b949e">${ops.comparators > 0 ? cmpExprs : 'No magnitude comparisons'}</td>
+    </tr>`;
+
+    // State Decode
+    const sdCount = ops.state_decodes || 0;
+    const sdExprs = (ops.state_decode_details || []).map(d => d.expr).slice(0,5).join(', ');
+    if (sdCount > 0) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">State Decode</td>
+        <td style="color:#c9d1d9">Yes (${sdCount})</td>
+        <td style="color:#8b949e">${sdExprs}</td>
+      </tr>`;
+    }
+
+    // SRL (shift registers)
+    html += `<tr style="border-bottom:1px solid #21262d">
+      <td style="padding:3px 4px;color:#58a6ff">SRL</td>
+      <td style="color:#c9d1d9">${ops.shifters > 0 ? 'Possible (' + ops.shifters + ' shift op' + (ops.shifters > 1 ? 's)' : ')') : 'No'}</td>
+      <td style="color:#8b949e">${ops.shifters > 0 ? 'FPGA: may infer SRL16/SRL32' : 'No shift registers'}</td>
+    </tr>`;
+
+    // FSM
+    if (fsm.states > 0) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">FSM</td>
+        <td style="color:#c9d1d9">Yes (${fsm.states} states, ${fsm.encoding_bits}-bit)</td>
+        <td style="color:#8b949e">One-hot: ${fsm.states} FFs | Binary: ${fsm.min_bits} FFs</td>
+      </tr>`;
+    }
+
+    // Constant propagation / dead code
+    const constCount = (opt.const_prop_count || 0) + (opt.dead_branches || 0);
+    if (constCount > 0) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#d2a8ff">Dead Code</td>
+        <td style="color:#d2a8ff">${constCount} branch(es) removed</td>
+        <td style="color:#8b949e">Synthesis will optimize away</td>
+      </tr>`;
+    }
+
+    // Combinational loop
+    const hasLoops = findings.some(f => f.rule === 'FUNC_comb_loop');
+    if (hasLoops) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#da3633">Combo Loop</td>
+        <td style="color:#da3633;font-weight:600">SYNTHESIS BLOCKER</td>
+        <td style="color:#8b949e">Most tools abort on combinational loops</td>
+      </tr>`;
+    }
+
+    // Multiple drivers
+    const hasMultiDrv = findings.some(f => f.rule === 'W_multi_driver');
+    if (hasMultiDrv) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#da3633">Multi-Driver</td>
+        <td style="color:#da3633;font-weight:600">SYNTHESIS BLOCKER</td>
+        <td style="color:#8b949e">Bus contention — synthesis may fail</td>
+      </tr>`;
+    }
+
+    // Synthesis blockers from findings
+    const blockerFindings = findings.filter(f => synthBlockerRules.includes(f.rule) && f.rule !== 'FUNC_comb_loop' && f.rule !== 'W_multi_driver');
+    if (blockerFindings.length > 0) {
+      const blockerNames = [...new Set(blockerFindings.map(f => f.rule))];
+      for (const rule of blockerNames) {
+        const count = blockerFindings.filter(f => f.rule === rule).length;
+        const label = rule.replace(/^(SIM_|SYNTH_\d+_|SYNTH_)/, '');
+        html += `<tr style="border-bottom:1px solid #21262d">
+          <td style="padding:3px 4px;color:#da3633">${label}</td>
+          <td style="color:#da3633;font-weight:600">SYNTHESIS BLOCKER (${count})</td>
+          <td style="color:#8b949e">${blockerFindings.find(f => f.rule === rule).message.slice(0,60)}</td>
+        </tr>`;
+      }
+    }
+
+    html += '</table>';
+
+    // Inferred Netlist Summary (Phase 4)
+    const netlistData = (result.measurements || {})['cogni.netlist'];
+    if (netlistData && netlistData.total_cells > 0) {
+      html += `<h4 style="color:#8b949e;margin:10px 0 6px;font-size:11px">INFERRED NETLIST</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px;font-size:11px">`;
+      const typeLabels = {FF:'Flip-Flops', LATCH:'Latches', MUX:'Muxes', ADDER:'Adders',
+        MULT:'Multipliers', COMP:'Comparators', SHIFT:'Shifters', BRAM:'BRAMs', LUT:'LUT-RAMs'};
+      for (const [type, count] of Object.entries(netlistData.cell_types || {})) {
+        const label = typeLabels[type] || type;
+        const color = type === 'LATCH' ? '#da3633' : '#58a6ff';
+        html += `<div style="text-align:center;padding:4px;background:#161b22;border:1px solid #30363d;border-radius:4px">
+          <div style="font-size:16px;font-weight:600;color:${color}">${count}</div>
+          <div style="color:#8b949e;font-size:9px">${label}</div>
+        </div>`;
+      }
+      html += `<div style="text-align:center;padding:4px;background:#161b22;border:1px solid #30363d;border-radius:4px">
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9">${netlistData.total_cells}</div>
+        <div style="color:#8b949e;font-size:9px">Total Cells</div>
+      </div>
+      <div style="text-align:center;padding:4px;background:#161b22;border:1px solid #30363d;border-radius:4px">
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9">${netlistData.total_nets}</div>
+        <div style="color:#8b949e;font-size:9px">Nets</div>
+      </div>`;
+      html += '</div>';
+    }
+
+    html += '</div>';
+  }
+
+  // ---- CDC CROSSING REPORT ----
+  const cdcData = (result.measurements || {})['cogni.cdc'];
+  if (cdcData && cdcData.total_crossings > 0) {
+    const safeCls = cdcData.violations === 0 ? 'val-good' : 'val-bad';
+    html += `<div class="result-section">
+      <h3>CDC CROSSING REPORT</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Total Crossings</span>
+            <span class="scorecard-value">${cdcData.total_crossings}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Safe (Synchronized)</span>
+            <span class="scorecard-value val-good">${cdcData.safe}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Violations</span>
+            <span class="scorecard-value ${safeCls}">${cdcData.violations}</span>
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">ID</th><th>Signal</th><th>Width</th>
+          <th>Source</th><th>Dest</th><th>Sync Type</th><th>Status</th>
+        </tr>`;
+    (cdcData.crossings || []).forEach(c => {
+      const stCls = c.status === 'PASS' ? 'color:#238636' : 'color:#da3633;font-weight:600';
+      const syncCls = c.sync_type.startsWith('NONE') ? 'color:#da3633' : 'color:#238636';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">${c.id}</td>
+        <td style="color:#c9d1d9">${c.signal}</td>
+        <td>${c.width}b</td>
+        <td style="color:#d2a8ff">${c.src_domain}</td>
+        <td style="color:#79c0ff">${c.dst_domain}</td>
+        <td style="${syncCls}">${c.sync_type}</td>
+        <td style="${stCls}">${c.status}</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // ---- RDC RESET DOMAIN REPORT ----
+  const rdcData = (result.measurements || {})['cogni.rdc'];
+  if (rdcData && rdcData.total_issues > 0) {
+    const rdcCls = rdcData.errors === 0 ? 'val-good' : 'val-bad';
+    html += `<div class="result-section">
+      <h3>RDC RESET DOMAIN REPORT</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Total Issues</span>
+            <span class="scorecard-value ${rdcCls}">${rdcData.total_issues}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Errors</span>
+            <span class="scorecard-value val-bad">${rdcData.errors}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Warnings</span>
+            <span class="scorecard-value" style="color:#d29922">${rdcData.warnings}</span>
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">Rule</th><th>Signal</th><th>Line</th>
+          <th>Severity</th><th>Detail</th>
+        </tr>`;
+    (rdcData.items || []).forEach(r => {
+      const sevCls = r.severity === 'error' ? 'color:#da3633;font-weight:600' : 'color:#d29922';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">${r.rule}</td>
+        <td style="color:#c9d1d9">${r.signal}</td>
+        <td>${r.line}</td>
+        <td style="${sevCls}">${r.severity.toUpperCase()}</td>
+        <td style="color:#8b949e;font-size:10px">${r.message.substring(0,80)}...</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // ---- DFT TESTABILITY REPORT ----
+  const dftData = (result.measurements || {})['cogni.dft'];
+  if (dftData && dftData.total_issues > 0) {
+    const dftCls = dftData.errors === 0 ? 'val-good' : 'val-bad';
+    html += `<div class="result-section">
+      <h3>DFT TESTABILITY REPORT</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Total Issues</span>
+            <span class="scorecard-value ${dftCls}">${dftData.total_issues}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Errors</span>
+            <span class="scorecard-value val-bad">${dftData.errors}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Warnings</span>
+            <span class="scorecard-value" style="color:#d29922">${dftData.warnings}</span>
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">Rule</th><th>Signal</th><th>Line</th>
+          <th>Severity</th><th>Detail</th>
+        </tr>`;
+    (dftData.items || []).forEach(r => {
+      const sevCls = r.severity === 'error' ? 'color:#da3633;font-weight:600' : 'color:#d29922';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">${r.rule}</td>
+        <td style="color:#c9d1d9">${r.signal}</td>
+        <td>${r.line}</td>
+        <td style="${sevCls}">${r.severity.toUpperCase()}</td>
+        <td style="color:#8b949e;font-size:10px">${r.message.substring(0,80)}...</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // ---- SVA FORMAL INTENT REPORT ----
+  const svaData = (result.measurements || {})['cogni.sva'];
+  if (svaData && svaData.total_issues > 0) {
+    const svaCls = svaData.errors === 0 ? 'val-good' : 'val-bad';
+    html += `<div class="result-section">
+      <h3>SVA FORMAL INTENT REPORT</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Total Issues</span>
+            <span class="scorecard-value ${svaCls}">${svaData.total_issues}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Errors</span>
+            <span class="scorecard-value val-bad">${svaData.errors}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Warnings</span>
+            <span class="scorecard-value" style="color:#d29922">${svaData.warnings}</span>
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">Rule</th><th>Signal</th><th>Line</th>
+          <th>Severity</th><th>Detail</th>
+        </tr>`;
+    (svaData.items || []).forEach(r => {
+      const sevCls = r.severity === 'error' ? 'color:#da3633;font-weight:600' : 'color:#d29922';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">${r.rule}</td>
+        <td style="color:#c9d1d9">${r.signal}</td>
+        <td>${r.line}</td>
+        <td style="${sevCls}">${r.severity.toUpperCase()}</td>
+        <td style="color:#8b949e;font-size:10px">${r.message.substring(0,80)}...</td>
+      </tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // ---- HIERARCHICAL ANALYSIS REPORT ----
+  const hierData = (result.measurements || {})['cogni.hier'];
+  if (hierData && hierData.total_issues > 0) {
+    const hierCls = hierData.errors === 0 ? 'val-good' : 'val-bad';
+    html += `<div class="result-section">
+      <h3>HIERARCHICAL ANALYSIS REPORT</h3>
+      <div class="synth-scorecard">
+        <div class="scorecard-grid">
+          <div class="scorecard-item">
+            <span class="scorecard-label">Total Issues</span>
+            <span class="scorecard-value ${hierCls}">${hierData.total_issues}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Errors</span>
+            <span class="scorecard-value val-bad">${hierData.errors}</span>
+          </div>
+          <div class="scorecard-item">
+            <span class="scorecard-label">Warnings</span>
+            <span class="scorecard-value" style="color:#d29922">${hierData.warnings}</span>
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px">
+        <tr style="color:#8b949e;text-align:left;border-bottom:1px solid #30363d">
+          <th style="padding:4px">Rule</th><th>Signal</th><th>Line</th>
+          <th>Severity</th><th>Detail</th>
+        </tr>`;
+    (hierData.items || []).forEach(r => {
+      const sevCls = r.severity === 'error' ? 'color:#da3633;font-weight:600' : 'color:#d29922';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:3px 4px;color:#58a6ff">${r.rule}</td>
+        <td style="color:#c9d1d9">${r.signal}</td>
+        <td>${r.line}</td>
+        <td style="${sevCls}">${r.severity.toUpperCase()}</td>
+        <td style="color:#8b949e;font-size:10px">${r.message.substring(0,80)}...</td>
+      </tr>`;
+    });
+    html += '</table></div>';
   }
 
   // ---- SYNTHESIS PREDICTIONS (grouped by category) ----
@@ -1401,11 +1536,12 @@ function renderCogniResults(result, rules) {
   if (preds.length > 0) {
     html += '<div class="result-section"><h3>SYNTHESIS PREDICTIONS</h3>';
 
-    const catOrder = ['optimization', 'area', 'timing', 'power', 'functional', 'latch', 'clean'];
+    const catOrder = ['functional', 'inference', 'optimization', 'clean'];
     const catLabels = {
-      optimization: 'Optimization (Const Prop / Dead Code)',
-      area: 'Area & Resources', timing: 'Timing', power: 'Power',
-      functional: 'Functional Risks', latch: 'Latch Inference', clean: 'Status'
+      inference: 'Hardware Inference (what synthesis will create)',
+      optimization: 'Optimization (what synthesis will remove)',
+      functional: 'Synthesis Blockers & Risks',
+      clean: 'Status'
     };
     const grouped = {};
     preds.forEach(p => {
@@ -1542,10 +1678,46 @@ async function runAgentReview() {
         html += '</table></div>';
       }
 
-      const findings = data.agent_findings || [];
-      if (findings.length > 0) {
-        html += '<h3 style="margin:8px 0 4px">Agent Findings</h3>';
-        findings.forEach(f => {
+      // RTL Findings (static analysis — with waived ones struck through)
+      const staticFindings = data.static_findings || [];
+      const waived = data.waived_findings || [];
+      const waivedKeys = new Set(waived.map(f => f.rule + ':' + f.line));
+
+      if (staticFindings.length > 0) {
+        const sGroups = {error:[], warning:[], info:[]};
+        staticFindings.forEach(f => (sGroups[f.severity] || sGroups.info).push(f));
+        for (const sev of ['error','warning','info']) {
+          const items = sGroups[sev];
+          if (!items.length) continue;
+          const label = {error:'ERRORS',warning:'WARNINGS',info:'INFO'}[sev];
+          html += `<div class="result-section"><h3>${label} (${items.length})</h3>`;
+          items.forEach(f => {
+            const sevCls = 'sev-' + f.severity;
+            const isWaived = waivedKeys.has(f.rule + ':' + f.line);
+            const wTag = isWaived ? '<span style="color:#d29922;font-size:10px;margin-left:6px">WAIVED</span>' : '';
+            const wStyle = isWaived ? 'opacity:0.5;text-decoration:line-through;' : '';
+            const conf = f.confidence || 0;
+            const confCls = conf >= 90 ? 'conf-high' : conf >= 60 ? 'conf-med' : 'conf-low';
+            const confTag = conf > 0 ? `<span class="conf-badge ${confCls}">${conf}%</span>` : '';
+            html += `<div class="warning-item finding-item" style="cursor:pointer;${wStyle}"
+              onclick="scrollToLine(${f.line})">
+              <span class="sev-badge ${sevCls}">${f.severity}</span>
+              ${confTag}
+              <span class="cat">[${f.rule}]</span>${wTag}
+              <span class="loc">${f.file}:<strong>${f.line}</strong></span>
+              <div class="msg">${escHtml(f.message)}</div>
+              ${f.synth_impact ? '<div class="rule-detail">Synth: ' + escHtml(f.synth_impact) + '</div>' : ''}
+            </div>`;
+          });
+          html += '</div>';
+        }
+      }
+
+      // Agent-discovered issues (missing bugs, FSM consequences)
+      const agentOnly = (data.agent_findings || []).filter(f => f.rule.startsWith('AGENT_'));
+      if (agentOnly.length > 0) {
+        html += '<div class="result-section"><h3>AGENT-DISCOVERED ('+agentOnly.length+')</h3>';
+        agentOnly.forEach(f => {
           const sevCls = 'sev-' + f.severity;
           html += `<div class="warning-item finding-item" style="cursor:pointer"
             onclick="scrollToLine(${f.line})">
@@ -1556,7 +1728,9 @@ async function runAgentReview() {
             ${f.synth_impact ? '<div class="rule-detail">Fix: ' + escHtml(f.synth_impact) + '</div>' : ''}
           </div>`;
         });
+        html += '</div>';
       }
+
       if (sr.length > 0) {
         html += '<h3 style="margin:8px 0 4px">Suggested New Rules</h3>';
         sr.forEach(r => {
@@ -1570,14 +1744,6 @@ async function runAgentReview() {
   }
   btn.disabled = false;
   btn.textContent = 'Run Cogni Agent Loop (LLM)';
-}
-
-function renderVCSResults(result, rules) {
-  renderToolResults('vcsResults', 'vcsBadge', result, 'vcs', rules);
-}
-
-function renderVerilatorResults(result, rules) {
-  renderToolResults('verilatorResults', 'verilatorBadge', result, 'verilator', rules);
 }
 
 function toggleRaw(id) {

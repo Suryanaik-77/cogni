@@ -1,0 +1,128 @@
+{
+  "alu": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      4,
+      0
+    ],
+    "ff_bits": [
+      0,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  },
+  "async_fifo": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      0,
+      0
+    ],
+    "ff_bits": [
+      1,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  },
+  "dual_port_ram": {
+    "adders": [
+      2,
+      0
+    ],
+    "comparators": [
+      2,
+      0
+    ],
+    "ff_bits": [
+      1,
+      0
+    ],
+    "multipliers": [
+      4,
+      0
+    ]
+  },
+  "i2c_master": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      0,
+      0
+    ],
+    "ff_bits": [
+      0,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  },
+  "pwm_generator": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      0,
+      0
+    ],
+    "ff_bits": [
+      0,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  },
+  "spi_master": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      2,
+      0
+    ],
+    "ff_bits": [
+      0,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  },
+  "sync_fifo": {
+    "adders": [
+      0,
+      0
+    ],
+    "comparators": [
+      0,
+      0
+    ],
+    "ff_bits": [
+      1,
+      0
+    ],
+    "multipliers": [
+      0,
+      0
+    ]
+  }
+}

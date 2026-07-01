@@ -1003,12 +1003,44 @@ function renderCogniResults(result, rules) {
   let html = '';
 
   // ---- RTL FINDINGS FIRST (grouped by severity) ----
-  const findings = result.findings || [];
-  state.lineMarkers = buildLineMarkers(findings);
+  const allFindings = result.findings || [];
+  state.lineMarkers = buildLineMarkers(allFindings);
   updateLineNumbers();
 
+  // Classify each finding by domain so the synthesis view stays focused.
+  // CDC/RDC are clock/reset-domain risks (reported separately below); STYLE_*
+  // are cosmetic. Everything else is a synthesis/functional finding.
+  const domainOf = (r) =>
+    (/^CDC_/.test(r) || /^RDC_/.test(r)) ? 'risk' :
+    /^STYLE_/.test(r) ? 'style' : 'synth';
+  const findings   = allFindings.filter(f => domainOf(f.rule) === 'synth');
+  const riskFindings  = allFindings.filter(f => domainOf(f.rule) === 'risk');
+  const styleFindings = allFindings.filter(f => domainOf(f.rule) === 'style');
+
+  // Render a plain list of findings into a section.
+  const renderFindingList = (items) => {
+    let s = '';
+    items.forEach(f => {
+      const sevCls = 'sev-' + f.severity;
+      const synthTip = f.synth_impact ? `<div class="rule-detail">Synth: ${escHtml(f.synth_impact)}</div>` : '';
+      const conf = f.confidence || 0;
+      const confCls = conf >= 90 ? 'conf-high' : conf >= 60 ? 'conf-med' : 'conf-low';
+      const confTag = conf > 0 ? `<span class="conf-badge ${confCls}">${conf}%</span>` : '';
+      s += `<div class="warning-item finding-item" data-line="${f.line}" style="cursor:pointer"
+        onclick="scrollToLine(${f.line})">
+        <span class="sev-badge ${sevCls}">${f.severity}</span>
+        ${confTag}
+        <span class="cat">[${f.rule}]</span>
+        <span class="loc">${f.file}:<strong>${f.line}</strong></span>
+        <div class="msg">${escHtml(f.message)}</div>
+        ${synthTip}
+      </div>`;
+    });
+    return s;
+  };
+
   if (findings.length > 0) {
-    // --- Signal-grouped view: cluster related findings per signal ---
+    // --- Signal-grouped view: cluster related synthesis findings per signal ---
     const sigMap = {};
     findings.forEach(f => {
       const m = f.message.match(/'([a-zA-Z_]\w*)'/);
@@ -1051,34 +1083,18 @@ function renderCogniResults(result, rules) {
       html += '</div>';
     }
 
-    // --- Standard severity-grouped view ---
+    // --- Standard severity-grouped view (synthesis/functional only) ---
     const groups = {error:[], warning:[], info:[]};
     findings.forEach(f => (groups[f.severity] || groups.info).push(f));
     const sectionNames = {error:'ERRORS', warning:'WARNINGS', info:'INFO'};
     for (const sev of ['error','warning','info']) {
       const items = groups[sev];
       if (!items.length) continue;
-      const label = sectionNames[sev];
-      html += `<div class="result-section"><h3>${label} (${items.length})</h3>`;
-      items.forEach(f => {
-        const sevCls = 'sev-' + f.severity;
-        const synthTip = f.synth_impact ? `<div class="rule-detail">Synth: ${escHtml(f.synth_impact)}</div>` : '';
-        const conf = f.confidence || 0;
-        const confCls = conf >= 90 ? 'conf-high' : conf >= 60 ? 'conf-med' : 'conf-low';
-        const confTag = conf > 0 ? `<span class="conf-badge ${confCls}">${conf}%</span>` : '';
-        html += `<div class="warning-item finding-item" data-line="${f.line}" style="cursor:pointer"
-          onclick="scrollToLine(${f.line})">
-          <span class="sev-badge ${sevCls}">${f.severity}</span>
-          ${confTag}
-          <span class="cat">[${f.rule}]</span>
-          <span class="loc">${f.file}:<strong>${f.line}</strong></span>
-          <div class="msg">${escHtml(f.message)}</div>
-          ${synthTip}
-        </div>`;
-      });
+      html += `<div class="result-section"><h3>${sectionNames[sev]} (${items.length})</h3>`;
+      html += renderFindingList(items);
       html += '</div>';
     }
-  } else {
+  } else if (allFindings.length === 0) {
     html += '<div class="result-section"><h3>RTL Findings</h3>';
     html += '<div style="padding:8px;color:#238636;font-size:12px">No issues found</div>';
     html += '</div>';
@@ -1624,6 +1640,25 @@ function renderCogniResults(result, rules) {
         </div>`;
       });
     });
+    html += '</div>';
+  }
+
+  // ---- DESIGN RISKS (CDC / RDC) — separate from synthesis ----
+  if (riskFindings.length > 0) {
+    const cdc = riskFindings.filter(f => /^CDC_/.test(f.rule));
+    const rdc = riskFindings.filter(f => /^RDC_/.test(f.rule));
+    html += `<div class="result-section"><h3>DESIGN RISKS &mdash; CLOCK / RESET DOMAIN (${riskFindings.length})</h3>`;
+    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Clock- and reset-domain-crossing risks &mdash; not synthesis blockers; verified structurally (see CDC/RDC reports for detail).</div>`;
+    if (cdc.length) { html += `<h4 style="color:#8b949e;margin:8px 0 4px;font-size:11px">CDC (${cdc.length})</h4>`; html += renderFindingList(cdc); }
+    if (rdc.length) { html += `<h4 style="color:#8b949e;margin:8px 0 4px;font-size:11px">RDC (${rdc.length})</h4>`; html += renderFindingList(rdc); }
+    html += '</div>';
+  }
+
+  // ---- CODING STYLE — separate from synthesis ----
+  if (styleFindings.length > 0) {
+    html += `<div class="result-section"><h3>CODING STYLE (${styleFindings.length})</h3>`;
+    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Cosmetic / convention suggestions &mdash; no synthesis impact.</div>`;
+    html += renderFindingList(styleFindings);
     html += '</div>';
   }
 

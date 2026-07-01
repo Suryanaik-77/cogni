@@ -140,14 +140,31 @@ def parse_verilator_xml(xml_text: str) -> VElab:
                 v.ff_signals[nm] = v.widths[nm]
     v.ff_bits = sum(v.ff_signals.values())
 
-    # Operators after generate unroll (count every cell node).
+    # Loop-index vars (integer/genvar). `--xml-only` does NOT unroll procedural
+    # for-loops, so index arithmetic (`8*i`, `i+1`, `i<N`) still appears as
+    # mul/add/compare over a symbolic index. Those fold away at synthesis and
+    # are NOT hardware — skip any operator whose *direct* operand is a loop
+    # index, mirroring Cogni's is_index_expr. (A real op that merely indexes,
+    # e.g. sum + data[i], keeps `i` nested inside an arraysel, so it is kept.)
+    loop_idx = {var.get("name") for var in module.findall("var")
+                if var.get("vartype") in ("integer", "genvar")}
+
+    def _is_index_op(node) -> bool:
+        for child in node:
+            if child.tag == "varref" and child.get("name") in loop_idx:
+                return True
+        return False
+
     for node in module.iter():
         if node.tag in _CMP_TAGS:
-            v.comparators += 1
+            if not _is_index_op(node):
+                v.comparators += 1
         elif node.tag in _ADD_TAGS:
-            v.adders += 1
+            if not _is_index_op(node):
+                v.adders += 1
         elif node.tag in _MUL_TAGS:
-            v.multipliers += 1
+            if not _is_index_op(node):
+                v.multipliers += 1
     v.always_blocks = sum(1 for _ in module.iter("always"))
 
     v.ok = True

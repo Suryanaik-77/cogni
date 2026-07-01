@@ -37,11 +37,11 @@
   },
   "dual_port_ram": {
     "adders": [
-      2,
+      0,
       0
     ],
     "comparators": [
-      2,
+      0,
       0
     ],
     "ff_bits": [
@@ -49,7 +49,7 @@
       0
     ],
     "multipliers": [
-      4,
+      0,
       0
     ]
   },

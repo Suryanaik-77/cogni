@@ -9884,16 +9884,27 @@ def analyze_file(filepath: str) -> list[Finding]:
 
 def analyze_design(rtl_files: list[str],
                    sdc_files: list[str] | None = None,
-                   upf_files: list[str] | None = None) -> AnalysisResult:
+                   upf_files: list[str] | None = None,
+                   use_verilator: bool | None = None) -> AnalysisResult:
     """5-phase SpyGlass-style analysis pipeline:
       Phase 1: Parse (tree-sitter AST + SDC/UPF constraints)
       Phase 2: Elaborate (per-file signals + cross-module hierarchy)
       Phase 3: Tier-1 language rules (fast, no extra context)
       Phase 4: Quick synthesis (SynthesisEstimator + InferredNetlist)
       Phase 5: Tier-2 structural rules (netlist/synth/elab context)
+
+    Elaboration backend:
+      Pure-Python (tree-sitter + fold engine) is the default. When
+      `use_verilator` is True (or COGNI_USE_VERILATOR=1) and the `verilator`
+      binary is present AND the design elaborates, Verilator's resolved
+      widths/params overlay the pure-Python facts for sign-off-grade accuracy.
+      Any failure silently falls back to pure-Python — the flag never blocks.
     """
     global _ACTIVE_SDC, _ACTIVE_UPF
     result = AnalysisResult(files=list(rtl_files))
+
+    if use_verilator is None:
+        use_verilator = os.environ.get("COGNI_USE_VERILATOR", "") in ("1", "true", "yes")
 
     sdc = SDCConstraints()
     for sdc_path in (sdc_files or []):
@@ -9953,6 +9964,32 @@ def analyze_design(rtl_files: list[str],
             signal_rw_maps[fname] = _build_signal_rw_map(tree.root_node)
             # Phase 2a: one elaboration model per file, queried by all phases.
             parsed_elab[fname] = build_elaboration_model(tree, signals, text)
+
+    # ── Phase 2a+: optional Verilator elaboration overlay ────────────
+    # When enabled and available, overlay Verilator's resolved widths/params
+    # onto the pure-Python facts so every rule + the estimator use
+    # sign-off-grade values. Silent fallback on any failure.
+    velab = None
+    elab_backend = "pure-python"
+    if use_verilator:
+        try:
+            from agent.verilator_elab import elaborate_with_verilator
+            velab = elaborate_with_verilator(list(rtl_files))
+        except Exception:
+            velab = None
+        if velab and velab.ok:
+            for fname, signals in parsed_signals.items():
+                for name, w in velab.widths.items():
+                    si = signals.get(name)
+                    if si and w > 0:
+                        si.width = w
+                elab = parsed_elab.get(fname)
+                if elab is not None:
+                    elab.constants.update(velab.params)
+            elab_backend = "verilator"
+        else:
+            elab_backend = "pure-python (verilator unavailable)"
+            velab = None
 
     # ── Phase 2: Elaborate (cross-module + param propagation) ────────
     elab_result = None
@@ -10248,6 +10285,17 @@ def analyze_design(rtl_files: list[str],
         all_signals=parsed_signals,
         precomputed_synth=per_file_synth,
     )
+
+    # Record which elaboration backend produced the facts (verilator overlay
+    # or pure-python) plus Verilator's cross-check counts when available.
+    result.measurements["cogni.elab.backend"] = elab_backend
+    if velab is not None:
+        result.measurements["cogni.verilator"] = {
+            "top": velab.top, "params": dict(velab.params),
+            "ff_bits": velab.ff_bits, "comparators": velab.comparators,
+            "adders": velab.adders, "multipliers": velab.multipliers,
+            "always_blocks": velab.always_blocks,
+        }
 
     # Add netlist summary to measurements
     if merged_netlist.cells:

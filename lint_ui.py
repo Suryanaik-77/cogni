@@ -196,10 +196,13 @@ def api_run():
                 if fn.endswith(".upf"):
                     upf_files.append(os.path.join(upf_dir, fn))
 
-    # Cogni RTL Analyzer (pure Python, no commercial tool)
+    # Cogni RTL Analyzer (pure Python by default; optional Verilator
+    # elaboration overlay via request flag or COGNI_USE_VERILATOR env).
     from agent.rtl_analyzer import analyze_design
+    use_verilator = bool(data.get("use_verilator")) or None
     cogni_result = analyze_design(all_files, sdc_files=sdc_files or None,
-                                  upf_files=upf_files or None)
+                                  upf_files=upf_files or None,
+                                  use_verilator=use_verilator)
     cogni_data = {
         "findings": [
             {"rule": f.rule, "severity": f.severity, "file": f.file,

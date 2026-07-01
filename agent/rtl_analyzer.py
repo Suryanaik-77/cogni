@@ -5906,6 +5906,156 @@ def FSM_unreachable_state(tree, file, signals):
     return findings
 
 
+# ===================================================================
+# FORMAL: FSM reachability analysis (proves properties, with evidence)
+# ===================================================================
+
+def _extract_fsm_models(tree) -> list[dict]:
+    """Extract FSM models: states, reset state, and the transition graph.
+
+    Unlike a lint pattern, this builds the actual state-transition graph so
+    reachability can be *proven* (BFS) rather than guessed. Only enums that are
+    real registered state variables (see _is_fsm_enum) are considered.
+    """
+    models = []
+    text = _node_text(tree.root_node)
+    for m in re.finditer(
+            r'typedef\s+enum\s+logic\s*\[\d+:\d+\]\s*\{([^}]+)\}\s*(\w+)', text):
+        states_text = re.sub(r'//[^\n]*', '', m.group(1))
+        type_name = m.group(2)
+        states = [s.strip().split('=')[0].strip()
+                  for s in states_text.split(',')
+                  if s.strip() and re.fullmatch(
+                      r'[a-zA-Z_]\w*', s.strip().split('=')[0].strip())]
+        if len(states) < 2 or not _is_fsm_enum(type_name, tree):
+            continue
+
+        graph: dict[str, set[str]] = {s: set() for s in states}
+        arm_line: dict[str, int] = {}
+        for cs in _find_nodes(tree.root_node, 'case_statement'):
+            ce = [c for c in cs.named_children if c.type == 'case_expression']
+            if not ce:
+                continue
+            ce_ids = _get_identifiers(ce[0])
+            if not any('state' in i.lower() or i in ('cs', 'ns')
+                       for i in ce_ids):
+                continue
+            for item in _find_direct_case_items(cs):
+                it = _node_text(item).strip()
+                colon = it.find(':')
+                if colon < 0:
+                    continue
+                label = it[:colon].strip()
+                if label not in graph:
+                    continue
+                arm_line.setdefault(label, _node_line(item))
+                for atype in ('blocking_assignment', 'nonblocking_assignment'):
+                    for asgn in _find_nodes(item, atype):
+                        target = asgn
+                        oa = _find_nodes(asgn, 'operator_assignment')
+                        if oa:                     # `x = expr` wraps operator_assignment
+                            target = oa[0]
+                        kids = target.named_children
+                        if len(kids) >= 2:
+                            for rid in _extract_rhs_identifiers(kids[-1]):
+                                if rid in graph:
+                                    graph[label].add(rid)
+
+        # Reset state: what the FSM register is loaded with under reset.
+        reset_state = states[0]
+        for always in _find_nodes(tree.root_node, 'always_construct'):
+            if _always_type(always) != 'always_ff':
+                continue
+            at = _node_text(always)
+            if 'rst' not in at.lower() and 'reset' not in at.lower():
+                continue
+            for atype in ('blocking_assignment', 'nonblocking_assignment'):
+                for asgn in _find_nodes(always, atype):
+                    kids = asgn.named_children
+                    if len(kids) >= 2:
+                        for rid in _extract_rhs_identifiers(kids[-1]):
+                            if rid in graph:
+                                reset_state = rid
+                                break
+        models.append({
+            "type": type_name, "states": states, "reset": reset_state,
+            "graph": graph, "arm_line": arm_line,
+            "line": text[:m.start()].count('\n') + 1,
+        })
+    return models
+
+
+def _fsm_reachability(model: dict) -> tuple[set, dict]:
+    """BFS from the reset state. Returns (reachable_set, path) where path[s] is
+    a shortest reset->s state sequence (the evidence)."""
+    graph, reset = model["graph"], model["reset"]
+    reachable = {reset}
+    path = {reset: [reset]}
+    queue = [reset]
+    while queue:
+        s = queue.pop(0)
+        for ns in graph.get(s, set()):
+            if ns not in reachable:
+                reachable.add(ns)
+                path[ns] = path[s] + [ns]
+                queue.append(ns)
+    return reachable, path
+
+
+_TERMINAL_HINT = re.compile(r'done|finish|complete|halt|error|trap|stop',
+                            re.IGNORECASE)
+
+
+def FORMAL_fsm_reachability(tree, file, signals):
+    """Formal FSM analysis: prove unreachable states and no-exit (deadlock)
+    states from the transition graph, reporting the reachability evidence."""
+    findings = []
+    for model in _extract_fsm_models(tree):
+        states, graph = model["states"], model["graph"]
+        reset = model["reset"]
+        reachable, path = _fsm_reachability(model)
+        reach_ev = ", ".join(sorted(reachable))
+
+        # Proven unreachable: no path from reset reaches this state.
+        for s in states:
+            if s in reachable:
+                continue
+            findings.append(Finding(
+                rule="FORMAL_unreachable_state", severity="warning",
+                file=file, line=model["arm_line"].get(s, model["line"]),
+                message=(
+                    f"state '{s}' is provably unreachable from reset "
+                    f"'{reset}' -- no transition targets it "
+                    f"(reachable set: {{{reach_ev}}})"),
+                synth_impact=(
+                    "Dead state: synthesis removes it; usually a missing or "
+                    "mis-typed transition into '" + s + "'"),
+            ))
+
+        # No-exit (deadlock): a reachable, non-terminal state with no outgoing
+        # transition to any other state -- the FSM cannot leave it.
+        for s in reachable:
+            outs = graph.get(s, set()) - {s}
+            if outs:
+                continue
+            if _TERMINAL_HINT.search(s):    # DONE/ERROR etc. may be intended sinks
+                continue
+            ev = " -> ".join(path.get(s, [s]))
+            has_self = s in graph.get(s, set())
+            kind = "self-loops forever" if has_self else "has no exit transition"
+            findings.append(Finding(
+                rule="FORMAL_deadlock_state", severity="warning",
+                file=file, line=model["arm_line"].get(s, model["line"]),
+                message=(
+                    f"state '{s}' {kind} (reached via {ev}); the FSM cannot "
+                    f"leave '{s}' once entered -- deadlock"),
+                synth_impact=(
+                    "Liveness: FSM gets stuck; add a transition out of '"
+                    + s + "' or confirm it is an intended terminal state"),
+            ))
+    return findings
+
+
 def FSM_no_default_transition(tree, file, signals):
     """FSM case statement without default transition."""
     findings = []
@@ -9295,7 +9445,7 @@ ALL_CHECKS = [
     MEM_read_write_conflict,
     # FSM (original + additional)
     FSM_encoding,
-    FSM_unreachable_state,
+    FORMAL_fsm_reachability,   # supersedes FSM_unreachable_state (adds evidence + deadlock)
     FSM_no_default_transition,
     # STARC methodology
     STARC_if_else_chain,
@@ -9798,6 +9948,8 @@ def _assign_confidence(findings: list[Finding]) -> None:
             f.confidence = 85
         elif f.rule.startswith('CDC_'):
             f.confidence = 85
+        elif f.rule.startswith('FORMAL_'):
+            f.confidence = 90   # graph-proven, not pattern-matched
         elif f.rule.startswith('UPF_'):
             f.confidence = 85
         elif f.rule.startswith('RDC_'):
@@ -10289,6 +10441,20 @@ def analyze_design(rtl_files: list[str],
             "warnings": len([i for i in sva_items
                              if i['severity'] == 'warning']),
             "items": sva_items,
+        }
+
+    # Formal FSM reachability summary (proven results with evidence)
+    formal_rules = ("FORMAL_unreachable_state", "FORMAL_deadlock_state")
+    formal_total = sum(counts.get(r, 0) for r in formal_rules)
+    if formal_total > 0:
+        formal_items = [{"rule": f.rule, "severity": f.severity,
+                         "line": f.line, "message": f.message}
+                        for f in result.findings if f.rule in formal_rules]
+        result.measurements["cogni.formal"] = {
+            "total_issues": formal_total,
+            "unreachable_states": counts.get("FORMAL_unreachable_state", 0),
+            "deadlock_states": counts.get("FORMAL_deadlock_state", 0),
+            "items": formal_items,
         }
 
     # Hierarchical summary

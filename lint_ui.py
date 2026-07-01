@@ -1351,6 +1351,29 @@ function renderCogniResults(result, rules) {
     html += '</div>';
   }
 
+  // ---- FORMAL VERIFICATION (FSM reachability, proven) ----
+  const formalData = (result.measurements || {})['cogni.formal'];
+  if (formalData && formalData.total_issues > 0) {
+    html += `<div class="result-section"><h3>FORMAL VERIFICATION &mdash; FSM REACHABILITY</h3>`;
+    html += `<div style="color:#8b949e;font-size:10px;margin:0 0 6px">Proven by state-transition graph analysis (BFS from reset), not pattern-matching &mdash; each result carries its evidence.</div>`;
+    html += `<div class="synth-scorecard"><div class="scorecard-grid">
+      <div class="scorecard-item"><span class="scorecard-label">Unreachable states</span>
+        <span class="scorecard-value ${formalData.unreachable_states ? 'val-bad' : 'val-good'}">${formalData.unreachable_states}</span></div>
+      <div class="scorecard-item"><span class="scorecard-label">Deadlock states</span>
+        <span class="scorecard-value ${formalData.deadlock_states ? 'val-bad' : 'val-good'}">${formalData.deadlock_states}</span></div>
+    </div></div>`;
+    (formalData.items || []).forEach(it => {
+      const label = it.rule === 'FORMAL_deadlock_state' ? 'DEADLOCK' : 'UNREACHABLE';
+      const col = it.rule === 'FORMAL_deadlock_state' ? '#da3633' : '#d29922';
+      html += `<div style="margin:4px 0;padding:5px 8px;background:#161b22;border-radius:4px;border-left:3px solid ${col};cursor:pointer" onclick="scrollToLine(${it.line})">
+        <span style="color:${col};font-weight:600;font-size:10px">${label}</span>
+        <span style="color:#8b949e;font-size:10px">L${it.line}</span>
+        <div style="color:#c9d1d9;font-size:11px;margin-top:2px">${escHtml(it.message)}</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
   // ---- CDC CROSSING REPORT ----
   const cdcData = (result.measurements || {})['cogni.cdc'];
   if (cdcData && cdcData.total_crossings > 0) {
